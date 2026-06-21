@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] — 2026-06-22
+## [0.3.0] — 
 
 Second security review. All three languages at parity (59 Python / 58 TypeScript
 / 57 Swift tests). See [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
@@ -24,7 +24,7 @@ Second security review. All three languages at parity (59 Python / 58 TypeScript
 ### Removed
 - `CODE_OF_CONDUCT.md`.
 
-## [0.2.0] — 2026-06-21
+## [0.2.0] — 
 
 Security-review hardening + a **Swift** implementation. See
 [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md). All three languages are at
@@ -55,7 +55,7 @@ parity (53 Python / 52 TypeScript / 51 Swift tests, identical verdicts).
   distinguish "a contained attack" from "an unsafe result". A detected-but-
   contained injection is now `safe=True`, `status="CONTAINED"`.
 
-## [0.1.0] — 2026-06-21
+## [0.1.0] — 
 
 Initial release. Python and TypeScript implementations at parity.
 

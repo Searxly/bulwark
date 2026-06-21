@@ -13,9 +13,9 @@ Full docs, threat model, and architecture: https://github.com/Myrhex-x/bulwark
 ## Install
 
 ```bash
-pip install bulwark-ai                 # zero dependencies
-pip install "bulwark-ai[openai]"       # optional OpenAI adapter
-pip install "bulwark-ai[anthropic]"    # optional Anthropic adapter
+pip install bulwark-guard                 # zero dependencies
+pip install "bulwark-guard[openai]"       # optional OpenAI adapter
+pip install "bulwark-guard[anthropic]"    # optional Anthropic adapter
 ```
 
 ## Use

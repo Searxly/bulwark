@@ -96,8 +96,8 @@ attacks it targets in [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 ## Quick start — Python
 
 ```bash
-pip install bulwark-ai          # zero dependencies
-# optional adapters:  pip install "bulwark-ai[openai]"  /  "[anthropic]"
+pip install bulwark-guard          # zero dependencies
+# optional adapters:  pip install "bulwark-guard[openai]"  /  "[anthropic]"
 ```
 
 ```python
@@ -269,7 +269,7 @@ a force field. See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for specifics.
 
 ```
 bulwark/
-├── python/        # pip package `bulwark-ai`   (stdlib-only core)
+├── python/        # pip package `bulwark-guard` (stdlib-only core)
 ├── typescript/    # npm package `bulwark-ai`   (isomorphic, no deps)
 ├── swift/         # SwiftPM library `Bulwark`  (Foundation only)
 ├── Package.swift  # root manifest for the Swift package

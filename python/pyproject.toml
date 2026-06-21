@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bulwark-ai"
+version = "0.1.0"
+description = "An open-source safeguard against prompt injection in AI summarization."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Bulwark contributors" }]
+keywords = [
+    "prompt-injection",
+    "llm",
+    "security",
+    "ai-safety",
+    "summarization",
+    "spotlighting",
+    "guardrails",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []  # zero runtime dependencies — the core is pure stdlib
+
+[project.urls]
+Homepage = "https://github.com/Myrhex-x/bulwark"
+Source = "https://github.com/Myrhex-x/bulwark"
+Issues = "https://github.com/Myrhex-x/bulwark/issues"
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.39"]
+html = ["beautifulsoup4>=4.12"]
+dev = ["pytest>=7", "mypy>=1.8", "ruff>=0.5"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bulwark"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.mypy]
+python_version = "3.8"
+ignore_missing_imports = true

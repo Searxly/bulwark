@@ -1,0 +1,244 @@
+/**
+ * Signature database of known prompt-injection patterns.
+ *
+ * Each signature carries a weight in [0, 1). Weights are combined with a
+ * "noisy-OR" so several weak signals accumulate but never exceed 1.0.
+ * Kept 1:1 in sync with the Python `patterns.py`.
+ */
+
+import type { Severity } from "./types.js";
+
+export interface Signature {
+  id: string;
+  category: string;
+  severity: Severity;
+  weight: number;
+  regex: RegExp;
+  description: string;
+}
+
+function sig(
+  id: string,
+  category: string,
+  severity: Severity,
+  weight: number,
+  pattern: string,
+  description: string,
+): Signature {
+  return { id, category, severity, weight, regex: new RegExp(pattern, "im"), description };
+}
+
+const INSTRUCTION_OVERRIDE: Signature[] = [
+  sig(
+    "io.ignore_previous", "instruction_override", "critical", 0.86,
+    "\\bignore\\s+(?:all\\s+|any\\s+|the\\s+)*(?:previous|prior|preceding|above|earlier|foregoing|former)\\b.{0,40}?\\b(?:instruction|prompt|message|context|rule|direction|command|guideline)s?\\b",
+    "Asks the model to ignore previous instructions",
+  ),
+  sig(
+    "io.disregard", "instruction_override", "critical", 0.86,
+    "\\b(?:disregard|forget|discard|overlook|set\\s+aside)\\s+(?:all\\s+|any\\s+|the\\s+)*(?:previous|prior|above|earlier|your)\\b.{0,40}?\\b(?:instruction|prompt|rule|direction|context)s?\\b",
+    "Asks the model to disregard prior instructions",
+  ),
+  sig(
+    "io.forget_everything", "instruction_override", "high", 0.78,
+    "\\bforget\\s+(?:everything|all|what)\\b.{0,40}?(?:said|instructed|above|told|before)",
+    "Asks the model to forget everything it was told",
+  ),
+  sig(
+    "io.new_instructions", "instruction_override", "high", 0.74,
+    "\\b(?:new|updated|revised|real|actual|true|correct|important)\\s+(?:instruction|task|directive|order|system\\s+prompt)s?\\b\\s*[:\\-—]",
+    "Introduces replacement 'new instructions'",
+  ),
+  sig(
+    "io.do_not_summarize", "instruction_override", "high", 0.72,
+    "\\bdo\\s+not\\s+(?:summari[sz]e|follow\\s+the\\s+(?:original|system|above))",
+    "Tells the model not to perform its real task",
+  ),
+  sig(
+    "io.instead_of", "instruction_override", "high", 0.72,
+    "\\binstead\\s+of\\s+(?:summari[sz]ing|following|doing)\\b",
+    "Redirects the model away from its task",
+  ),
+  sig(
+    "io.override", "instruction_override", "high", 0.70,
+    "\\boverride\\b.{0,30}?\\b(?:instruction|prompt|system|rule|setting|safety)s?\\b",
+    "Asks to override instructions or safety settings",
+  ),
+  sig(
+    "io.from_now_on", "instruction_override", "medium", 0.45,
+    "\\bfrom\\s+now\\s+on\\b.{0,40}?\\byou\\s+(?:will|must|should|shall)\\b",
+    "Attempts to install a new standing directive",
+  ),
+];
+
+const ROLE_INJECTION: Signature[] = [
+  sig(
+    "role.chatml", "role_injection", "critical", 0.82,
+    "<\\|\\s*(?:im_start|im_end|im_sep|system|assistant|user|endoftext)\\s*\\|>",
+    "ChatML / special role tokens",
+  ),
+  sig(
+    "role.inst", "role_injection", "high", 0.74,
+    "\\[/?\\s*(?:INST|SYS)\\s*\\]",
+    "Llama-style [INST]/[SYS] role markers",
+  ),
+  sig(
+    "role.line_marker", "role_injection", "high", 0.66,
+    "^\\s*(?:system|assistant|developer)\\s*(?:message)?\\s*:\\s*\\S",
+    "Line begins with a system/assistant role label",
+  ),
+  sig(
+    "role.markdown_header", "role_injection", "medium", 0.52,
+    "^#{1,6}\\s*(?:System|Instruction|Assistant|Developer)\\b",
+    "Markdown header impersonating a system section",
+  ),
+  sig(
+    "role.xml_tag", "role_injection", "medium", 0.50,
+    "<\\s*/?\\s*(?:system|assistant|developer)(?:_prompt)?\\s*>",
+    "XML-style system/assistant tags",
+  ),
+  sig(
+    "role.begin_system", "role_injection", "high", 0.70,
+    "\\bbegin\\s+(?:system|new)\\s+(?:prompt|instructions?)\\b",
+    "Declares the beginning of a system prompt",
+  ),
+];
+
+const PROMPT_LEAK: Signature[] = [
+  sig(
+    "leak.reveal_prompt", "prompt_leak", "high", 0.80,
+    "\\b(?:reveal|repeat|print|show|output|echo|display|reproduce|spell\\s+out|tell\\s+me)\\b.{0,30}?\\b(?:system\\s+prompt|your\\s+(?:instructions|prompt|system|rules|guidelines)|initial\\s+(?:prompt|instructions)|the\\s+(?:prompt|text)\\s+above|everything\\s+above)\\b",
+    "Tries to exfiltrate the system prompt",
+  ),
+  sig(
+    "leak.what_are_instructions", "prompt_leak", "high", 0.74,
+    "\\bwhat\\s+(?:are|were)\\s+your\\s+(?:original\\s+|initial\\s+)?(?:instructions|system\\s+prompt|rules|guidelines)\\b",
+    "Asks the model to disclose its instructions",
+  ),
+  sig(
+    "leak.begin_reply_with", "prompt_leak", "high", 0.70,
+    "\\b(?:begin|start|prefix|preface)\\s+(?:your\\s+)?(?:reply|answer|response|the\\s+summary|output)\\s+(?:with|by)\\b",
+    "Tries to control the start of the output",
+  ),
+  sig(
+    "leak.verbatim", "prompt_leak", "medium", 0.55,
+    "\\b(?:repeat|output|print)\\b.{0,20}?\\b(?:verbatim|word\\s+for\\s+word|exactly)\\b",
+    "Asks for verbatim reproduction",
+  ),
+];
+
+const EXFILTRATION: Signature[] = [
+  sig(
+    "exfil.markdown_image", "exfiltration", "high", 0.80,
+    "!\\[[^\\]]*\\]\\(\\s*https?://[^)\\s]+",
+    "Markdown image with a remote URL (classic exfiltration channel)",
+  ),
+  sig(
+    "exfil.send_to_url", "exfiltration", "critical", 0.84,
+    "\\b(?:send|post|exfiltrate|upload|transmit|leak|forward|report|deliver)\\b.{0,50}?\\bhttps?://",
+    "Asks the model to send data to a URL",
+  ),
+  sig(
+    "exfil.fetch", "exfiltration", "high", 0.72,
+    "\\b(?:fetch|curl|wget|open|visit|browse\\s+to|navigate\\s+to|GET|POST)\\b\\s+`?https?://",
+    "Asks the model to fetch/visit a URL",
+  ),
+  sig(
+    "exfil.append_to_url", "exfiltration", "high", 0.74,
+    "\\bappend\\b.{0,30}?\\bto\\s+the\\s+(?:url|link|image|address|query)\\b",
+    "Asks to append data to a URL (exfiltration)",
+  ),
+  sig(
+    "exfil.include_link", "exfiltration", "medium", 0.50,
+    "\\b(?:include|embed|add|insert)\\b.{0,30}?\\b(?:tracking\\s+pixel|this\\s+(?:link|image|url))\\b",
+    "Asks to embed a link/pixel in the output",
+  ),
+];
+
+const JAILBREAK: Signature[] = [
+  sig(
+    "jb.dan", "jailbreak", "high", 0.78,
+    "\\b(?:DAN\\b|do\\s+anything\\s+now|developer\\s+mode|jailbreak|STAN\\b|AIM\\b)",
+    "Known jailbreak persona / phrase",
+  ),
+  sig(
+    "jb.you_are_now", "jailbreak", "high", 0.70,
+    "\\byou\\s+are\\s+(?:now\\s+)?(?:DAN\\b|an?\\s+(?:unrestricted|unfiltered|uncensored|amoral|evil)\\b)",
+    "Reassigns the model to an unrestricted persona",
+  ),
+  sig(
+    "jb.no_restrictions", "jailbreak", "high", 0.68,
+    "\\b(?:no\\s+(?:longer\\s+)?(?:bound|restricted|limited)\\s+by|without\\s+any\\s+(?:restrictions|filters|rules|guidelines|limitations))\\b",
+    "Claims the model has no restrictions",
+  ),
+  sig(
+    "jb.pretend", "jailbreak", "medium", 0.40,
+    "\\b(?:pretend|imagine|roleplay|role-play)\\s+(?:that\\s+)?(?:to\\s+be|you\\s+are|you're)\\b",
+    "Roleplay framing used to bypass rules",
+  ),
+  sig(
+    "jb.act_as", "jailbreak", "low", 0.28,
+    "\\bact\\s+as\\s+(?:if\\s+you\\s+(?:are|were)\\s+|a\\s+|an\\s+|the\\s+)",
+    "'Act as' framing (often benign — low weight)",
+  ),
+];
+
+const TOOL_INJECTION: Signature[] = [
+  sig(
+    "tool.call_function", "tool_injection", "high", 0.62,
+    "\\b(?:call|invoke|execute|run|trigger)\\b.{0,25}?\\b(?:function|tool|command|api|endpoint|webhook)\\b",
+    "Asks the model to call a tool/function",
+  ),
+  sig(
+    "tool.json_call", "tool_injection", "medium", 0.55,
+    '"(?:function_call|tool_call|name|arguments)"\\s*:',
+    "Inline tool-call JSON",
+  ),
+  sig(
+    "tool.destructive", "tool_injection", "high", 0.66,
+    "\\b(?:delete|drop|wipe|erase|rm\\s+-rf|truncate|format)\\b.{0,25}?\\b(?:file|files|database|table|record|directory|everything|all\\s+data)\\b",
+    "Destructive action request",
+  ),
+];
+
+const BOUNDARY: Signature[] = [
+  sig(
+    "bnd.end_of_document", "boundary_breakout", "medium", 0.58,
+    "\\bEND\\s+OF\\s+(?:DOCUMENT|CONTENT|DATA|UNTRUSTED|INPUT|PAGE|ARTICLE|TEXT)\\b",
+    "Fake 'end of document' boundary",
+  ),
+  sig(
+    "bnd.close_wrapper", "boundary_breakout", "medium", 0.56,
+    "</\\s*(?:untrusted|document|content|data|user_input|context)\\s*>",
+    "Tries to close the containing wrapper",
+  ),
+  sig(
+    "bnd.dashes_end", "boundary_breakout", "low", 0.30,
+    "^-{3,}\\s*(?:END|STOP|SYSTEM|ASSISTANT)\\b",
+    "Dashed separator followed by a control word",
+  ),
+];
+
+const ENCODING: Signature[] = [
+  sig(
+    "enc.base64_blob", "encoding", "low", 0.22,
+    "\\b[A-Za-z0-9+/]{60,}={0,2}\\b",
+    "Long Base64-looking blob (possible hidden payload)",
+  ),
+  sig(
+    "enc.decode_request", "encoding", "medium", 0.50,
+    "\\b(?:decode|base64-?decode|rot13|reverse|unscramble)\\b.{0,30}?\\b(?:and|then)\\b.{0,20}?\\b(?:follow|execute|run|do|obey)\\b",
+    "Asks the model to decode then execute",
+  ),
+];
+
+export const SIGNATURES: Signature[] = [
+  ...INSTRUCTION_OVERRIDE,
+  ...ROLE_INJECTION,
+  ...PROMPT_LEAK,
+  ...EXFILTRATION,
+  ...JAILBREAK,
+  ...TOOL_INJECTION,
+  ...BOUNDARY,
+  ...ENCODING,
+];

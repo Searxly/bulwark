@@ -33,11 +33,15 @@ canonicalize text so detection can't be evaded with look-alikes.
 
 **Goal:** quantify how likely the text is an attack.
 
-- Runs a [signature database](../python/src/bulwark/patterns.py) of 49 regexes
-  across categories: `instruction_override`, `role_injection`, `prompt_leak`,
+- Runs a [signature database](../python/src/bulwark/patterns.py) of 58 regexes
+  (English + multilingual: fr/es/de/pt/it/ru/zh/ja) across categories:
+  `instruction_override`, `role_injection`, `prompt_leak`,
   `exfiltration`, `jailbreak`, `tool_injection`, `boundary_breakout`, `encoding`.
 - Adds **structural heuristics** (density of imperative-led lines, second-person
   directives).
+- Runs **two passes**: the signatures scan the un-folded text (so multilingual
+  and legitimate non-Latin scripts work) *and* a confusable-folded copy (so
+  homoglyph-disguised English is caught). Findings are merged, deduped by id.
 - Combines every weighted signal — including the sanitize-stage findings — with a
   **noisy-OR**:
 
@@ -90,9 +94,11 @@ transforms:
 - The reply is **normalized** (invisibles stripped, NFKC) first, so a
   zero-width-split canary or URL cannot evade the checks.
 - **Canary leak** → the prompt was exfiltrated → **unsafe**, redacted.
+- **Prompt-fingerprint leak** → a verbatim fragment of the system prompt appears
+  even though the canary was stripped → **unsafe**.
 - **Boundary-nonce leak** → confusion/leak → redacted.
-- **Exfiltration** — markdown images/links, HTML `<img>`, autolinks, and raw URLs
-  with a data-bearing query string → stripped.
+- **Exfiltration** — markdown images/links, HTML `<img>`, autolinks, raw URLs
+  with a data-bearing query string, and long Base64 blobs → stripped/flagged.
 - **Compliance tells** at the start of the reply → flagged.
 - Returns a possibly-redacted summary, a `safe` flag, and findings.
 

@@ -17,9 +17,12 @@ We aim to acknowledge reports within a few days.
 ## Scope
 
 In scope:
-- Sanitization bypasses (hidden text that survives `sanitize`).
-- Detection evasion that an added signature could reasonably catch.
-- Output-validation bypasses (canary/nonce/exfiltration that slips through).
+- Sanitization bypasses (hidden text that survives `sanitize` — invisible
+  Unicode, homoglyphs, nested hidden HTML).
+- Detection evasion that an added signature could reasonably catch, including
+  payloads in languages Bulwark does not yet cover.
+- Output-validation bypasses (canary, prompt-fingerprint, nonce, or
+  exfiltration that slips through).
 - Boundary-breakout against the nonce delimiter.
 
 Out of scope (known limitations, see [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)):

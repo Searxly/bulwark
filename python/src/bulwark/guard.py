@@ -121,29 +121,33 @@ class Bulwark:
             ))
         return result
 
-    def _detection_text(self, san: SanitizeResult) -> str:
-        """Text used for detection only: confusable-folded so cross-script
-        homoglyph disguises are caught. Never sent to the model."""
-        return _sanitize.fold_confusables(san.text) if self.config.fold_confusables else san.text
+    def _folded_text(self, san: SanitizeResult) -> "str | None":
+        """Confusable-folded copy for the detector's second pass (homoglyph
+        disguises). Detection still runs primarily on the un-folded text so
+        legitimate non-Latin scripts (and multilingual signatures) keep working.
+        Never sent to the model."""
+        return _sanitize.fold_confusables(san.text) if self.config.fold_confusables else None
 
     def scan(self, content: str) -> DetectResult:
         """Sanitize + detect only — no model call. Use to gate content yourself."""
         san = self.sanitize(content)
         return _detect.scan(
-            self._detection_text(san),
+            san.text,
             threshold=self.config.detection_threshold,
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
+            also_scan=self._folded_text(san),
         )
 
     def prepare(self, content: str) -> "PreparedRequest":
         """Sanitize, detect, spotlight and build messages — ready to send to any model."""
         san = self.sanitize(content)
         det = _detect.scan(
-            self._detection_text(san),
+            san.text,
             threshold=self.config.detection_threshold,
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
+            also_scan=self._folded_text(san),
         )
         spot = _spotlight.spotlight(
             san.text,

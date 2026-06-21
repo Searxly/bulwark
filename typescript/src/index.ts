@@ -18,7 +18,7 @@ import { detect } from "./detect.js";
 import { foldConfusables, sanitize } from "./sanitize.js";
 import type { DetectResult } from "./types.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 export {
   Bulwark,
@@ -41,5 +41,5 @@ export * from "./types.js";
  * Detection runs on a confusable-folded copy so homoglyph disguises are caught. */
 export function scan(text: string, threshold = 0.5): DetectResult {
   const s = sanitize(text);
-  return detect(foldConfusables(s.text), { threshold, extraFindings: s.findings });
+  return detect(s.text, { threshold, extraFindings: s.findings, alsoScan: foldConfusables(s.text) });
 }

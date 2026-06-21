@@ -314,6 +314,61 @@ _ADVANCED = [
 ]
 
 
+# --- Multilingual ----------------------------------------------------------
+# Attackers don't have to write in English. These cover the highest-signal
+# "ignore previous instructions" / "reveal the system prompt" payloads in major
+# languages. Latin-script patterns use \b/\w (ASCII verb stems); Cyrillic and
+# CJK patterns use explicit ranges / literals and NO \b or \w, so they behave
+# identically across the Python, ICU (Swift), and JavaScript regex engines.
+_MULTILINGUAL = [
+    _sig(
+        "ml.ignore_fr", "instruction_override", Severity.HIGH, 0.80,
+        r"\bignor\w*\b.{0,40}?\b(?:instructions?|consignes?|directives?)\b.{0,25}?\b(?:pr[ée]c[ée]dentes?|ant[ée]rieures?|ci-dessus)\b",
+        "Ignore-previous-instructions (French)",
+    ),
+    _sig(
+        "ml.ignore_es", "instruction_override", Severity.HIGH, 0.80,
+        r"\bignor\w*\b.{0,40}?\binstrucciones\b.{0,25}?\b(?:anteriores|previas)\b",
+        "Ignore-previous-instructions (Spanish)",
+    ),
+    _sig(
+        "ml.ignore_de", "instruction_override", Severity.HIGH, 0.80,
+        r"\bignorier\w*\b.{0,40}?\b(?:vorherigen|obigen|bisherigen|vorigen)\b.{0,25}?\banweisungen\b",
+        "Ignore-previous-instructions (German)",
+    ),
+    _sig(
+        "ml.ignore_pt", "instruction_override", Severity.HIGH, 0.80,
+        r"\bignor\w*\b.{0,40}?\binstru[çc][õo]es\b.{0,25}?\banteriores\b",
+        "Ignore-previous-instructions (Portuguese)",
+    ),
+    _sig(
+        "ml.ignore_it", "instruction_override", Severity.HIGH, 0.80,
+        r"\bignor\w*\b.{0,40}?\bistruzioni\b.{0,25}?\bprecedenti\b",
+        "Ignore-previous-instructions (Italian)",
+    ),
+    _sig(
+        "ml.ignore_ru", "instruction_override", Severity.HIGH, 0.80,
+        r"игнорир[а-яё]*[\s\S]{0,30}?(?:инструкции|указания|команды|правила)",
+        "Ignore-instructions (Russian)",
+    ),
+    _sig(
+        "ml.ignore_zh", "instruction_override", Severity.HIGH, 0.82,
+        r"(?:忽略|无视|忽視|無視)[^。\n]{0,10}(?:指令|指示|提示|命令|规则|規則)",
+        "Ignore-instructions (Chinese)",
+    ),
+    _sig(
+        "ml.ignore_ja", "instruction_override", Severity.HIGH, 0.80,
+        r"(?:指示|命令|指令)を[^。\n]{0,6}無視",
+        "Ignore-instructions (Japanese)",
+    ),
+    _sig(
+        "ml.reveal_zh", "prompt_leak", Severity.HIGH, 0.78,
+        r"(?:显示|输出|告诉我|泄露|重复|打印)[^。\n]{0,8}(?:系统提示|系统指令|你的指令|提示词|初始指令)",
+        "Reveal-system-prompt (Chinese)",
+    ),
+]
+
+
 SIGNATURES: List[Signature] = (
     _INSTRUCTION_OVERRIDE
     + _ROLE_INJECTION
@@ -324,4 +379,5 @@ SIGNATURES: List[Signature] = (
     + _BOUNDARY
     + _ENCODING
     + _ADVANCED
+    + _MULTILINGUAL
 )

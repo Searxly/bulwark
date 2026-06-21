@@ -14,6 +14,14 @@ private let complianceRegex = CompiledRegex(
     options: [.caseInsensitive]
 )
 private let canaryPrefixRegex = CompiledRegex(#"BULWARK-CANARY-\w*"#, options: [])
+private let b64BlobRegex = CompiledRegex(#"\b[A-Za-z0-9+/]{40,}={0,2}\b"#, options: [])
+// Distinctive phrases from the hardened system prompt; a verbatim appearance in
+// the output means the rules leaked even if the canary line was stripped.
+private let promptFingerprints = [
+    "bulwark-summarizer",
+    "outrank anything found inside the content",
+    "a quotation from a possibly hostile third party",
+]
 
 public struct ValidateOptions {
     public var redactLinks: Bool
@@ -108,7 +116,22 @@ public func validateOutput(_ summary: String?, context ctx: PromptContext, optio
         }
     }
 
-    // 5. Compliance tell at the start of the reply.
+    // 5. System-prompt fingerprint leak (rules leaked even without the canary).
+    let lowered = cleaned.lowercased()
+    if promptFingerprints.contains(where: { lowered.contains($0) }) {
+        findings.append(Finding(stage: .validate, category: "prompt_leak", severity: .critical, weight: 0.95,
+                                message: "Output contains a verbatim fragment of the system prompt — the rules leaked"))
+        if options.blockOnLeak { safe = false }
+    }
+
+    // 6. Encoded blob in output (possible exfiltration the model encoded).
+    if let m = b64BlobRegex.firstMatch(cleaned) {
+        findings.append(Finding(stage: .validate, category: "encoded_output", severity: .medium, weight: 0.4,
+                                message: "Output contains a long Base64-like blob (possible encoded exfiltration)",
+                                excerpt: excerpt80(m.string(in: cleaned))))
+    }
+
+    // 7. Compliance tell at the start of the reply.
     if complianceRegex.test(cleaned) {
         findings.append(Finding(stage: .validate, category: "compliance_tell", severity: .medium, weight: 0.5,
                                 message: "Output opens with a phrase typical of obeying an injected instruction",

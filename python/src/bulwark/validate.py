@@ -42,6 +42,15 @@ _COMPLIANCE_RE = re.compile(
     re.IGNORECASE,
 )
 _CANARY_PREFIX_RE = re.compile(r"BULWARK-CANARY-\w*")
+_B64_BLOB_RE = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")
+# Distinctive phrases from the hardened system prompt. If any appears verbatim in
+# the output, the rules leaked even if the canary line was stripped. Chosen to be
+# long and unique enough that a normal summary won't contain them.
+_PROMPT_FINGERPRINTS = (
+    "bulwark-summarizer",
+    "outrank anything found inside the content",
+    "a quotation from a possibly hostile third party",
+)
 
 
 def validate_output(
@@ -144,7 +153,27 @@ def validate_output(
             cleaned = _AUTOLINK_RE.sub("", cleaned)
             redacted = True
 
-    # 5. Compliance tells at the very start of the reply.
+    # 5. System-prompt fingerprint leak (rules leaked even without the canary).
+    lowered = cleaned.lower()
+    if any(fp in lowered for fp in _PROMPT_FINGERPRINTS):
+        findings.append(Finding(
+            Stage.VALIDATE, "prompt_leak", Severity.CRITICAL,
+            "Output contains a verbatim fragment of the system prompt — the rules leaked",
+            weight=0.95,
+        ))
+        if block_on_leak:
+            safe = False
+
+    # 6. Encoded blob in output (possible exfiltration the model encoded).
+    if _B64_BLOB_RE.search(cleaned):
+        findings.append(Finding(
+            Stage.VALIDATE, "encoded_output", Severity.MEDIUM,
+            "Output contains a long Base64-like blob (possible encoded exfiltration)",
+            weight=0.4,
+            excerpt=(_B64_BLOB_RE.search(cleaned).group(0)[:60]),
+        ))
+
+    # 7. Compliance tells at the very start of the reply.
     if _COMPLIANCE_RE.match(cleaned):
         findings.append(Finding(
             Stage.VALIDATE, "compliance_tell", Severity.MEDIUM,

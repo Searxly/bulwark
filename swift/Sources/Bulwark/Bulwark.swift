@@ -114,24 +114,28 @@ public struct Bulwark {
         return result
     }
 
-    /// Detection-only text: confusable-folded so homoglyph disguises are caught.
-    private func detectionText(_ san: SanitizeResult) -> String {
-        config.foldConfusables ? foldConfusables(san.text) : san.text
+    /// Confusable-folded copy for the detector's second pass (homoglyph
+    /// disguises). Detection runs primarily on the un-folded text so legitimate
+    /// non-Latin scripts and multilingual signatures keep working.
+    private func foldedText(_ san: SanitizeResult) -> String? {
+        config.foldConfusables ? foldConfusables(san.text) : nil
     }
 
     /// Sanitize + detect only — no model call. Use to gate content yourself.
     public func scan(_ content: String) -> DetectResult {
         let san = sanitize(content)
-        return detect(detectionText(san), options: DetectOptions(
-            threshold: config.detectionThreshold, extraFindings: san.findings, useHeuristics: config.useHeuristics
+        return detect(san.text, options: DetectOptions(
+            threshold: config.detectionThreshold, extraFindings: san.findings,
+            useHeuristics: config.useHeuristics, alsoScan: foldedText(san)
         ))
     }
 
     /// Sanitize, detect, spotlight and build messages — ready for any model.
     public func prepare(_ content: String) -> PreparedRequest {
         let san = sanitize(content)
-        let det = detect(detectionText(san), options: DetectOptions(
-            threshold: config.detectionThreshold, extraFindings: san.findings, useHeuristics: config.useHeuristics
+        let det = detect(san.text, options: DetectOptions(
+            threshold: config.detectionThreshold, extraFindings: san.findings,
+            useHeuristics: config.useHeuristics, alsoScan: foldedText(san)
         ))
         let spot = spotlight(san.text, options: SpotlightOptions(methods: config.spotlightMethods, marker: config.marker))
         let (messages, context) = buildMessages(spot, options: BuildOptions(
@@ -192,7 +196,7 @@ public struct Bulwark {
 /// Detection runs on a confusable-folded copy so homoglyph disguises are caught.
 public func scan(_ text: String, threshold: Double = 0.5) -> DetectResult {
     let s = sanitize(text)
-    return detect(foldConfusables(s.text), options: DetectOptions(threshold: threshold, extraFindings: s.findings))
+    return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldConfusables(s.text)))
 }
 
-public let bulwarkVersion = "0.2.0"
+public let bulwarkVersion = "0.3.0"

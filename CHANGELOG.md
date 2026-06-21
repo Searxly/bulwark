@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-22
+
+Second security review. All three languages at parity (59 Python / 58 TypeScript
+/ 57 Swift tests). See [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+
+### Added
+- **Multilingual detection** — injection signatures for French, Spanish, German,
+  Portuguese, Italian, Russian, Chinese, and Japanese (58 signatures total),
+  with a multilingual corpus enforcing recall and zero false positives on benign
+  foreign text.
+- **Two-pass detection** — signatures run on the un-folded text (multilingual /
+  non-Latin) *and* a confusable-folded copy (homoglyph English), merged + deduped.
+- **Prompt-fingerprint leak detection** — output validation flags verbatim
+  fragments of the system prompt even when the canary line was stripped.
+- **Encoded-output flag** — long Base64 blobs in the output are flagged as
+  possible encoded exfiltration.
+
+### Removed
+- `CODE_OF_CONDUCT.md`.
+
 ## [0.2.0] — 2026-06-21
 
 Security-review hardening + a **Swift** implementation. See

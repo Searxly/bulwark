@@ -116,28 +116,32 @@ export class Bulwark {
     return result;
   }
 
-  /** Detection-only text: confusable-folded so homoglyph disguises are caught. */
-  private detectionText(san: SanitizeResult): string {
-    return this.config.foldConfusables ? foldConfusables(san.text) : san.text;
+  /** Confusable-folded copy for the detector's second pass (homoglyph
+   * disguises). Detection runs primarily on the un-folded text so legitimate
+   * non-Latin scripts and multilingual signatures keep working. */
+  private foldedText(san: SanitizeResult): string | undefined {
+    return this.config.foldConfusables ? foldConfusables(san.text) : undefined;
   }
 
   /** Sanitize + detect only — no model call. Use to gate content yourself. */
   scan(content: string): DetectResult {
     const san = this.sanitize(content);
-    return detect(this.detectionText(san), {
+    return detect(san.text, {
       threshold: this.config.detectionThreshold,
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
+      alsoScan: this.foldedText(san),
     });
   }
 
   /** Sanitize, detect, spotlight and build messages — ready for any model. */
   prepare(content: string): PreparedRequest {
     const san = this.sanitize(content);
-    const det = detect(this.detectionText(san), {
+    const det = detect(san.text, {
       threshold: this.config.detectionThreshold,
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
+      alsoScan: this.foldedText(san),
     });
     const spot = spotlight(san.text, { methods: this.config.spotlightMethods, marker: this.config.marker });
     const { messages, context } = buildMessages(spot, {

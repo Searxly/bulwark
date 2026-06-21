@@ -40,7 +40,7 @@ from .types import (
 )
 from .validate import validate_output
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Bulwark",
@@ -74,4 +74,9 @@ def scan(text: str, *, threshold: float = 0.5) -> DetectResult:
     disguises (e.g. Cyrillic look-alikes) are caught.
     """
     result = sanitize_text(text)
-    return _scan(fold_confusables(result.text), threshold=threshold, extra_findings=result.findings)
+    return _scan(
+        result.text,
+        threshold=threshold,
+        extra_findings=result.findings,
+        also_scan=fold_confusables(result.text),
+    )

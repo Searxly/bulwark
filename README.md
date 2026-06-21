@@ -56,7 +56,7 @@ Python · TypeScript · Swift · zero required dependencies · works with OpenAI
         │
         ▼
   ┌─ 2. DETECT ─────────────────────────────────────────────────┐
-  │  Score the text against 49 injection signatures + heuristics  │
+  │  Score against 58 signatures (English + 8 languages) + heuristics │
   │  using a noisy-OR. Block, flag, or just report — your call.   │
   └──────────────────────────────────────────────────────────────┘
         │
@@ -174,7 +174,7 @@ if (scan(text).injected) { /* … */ }
 
 ## Quick start — Swift
 
-Add via Swift Package Manager: `.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.2.0")`
+Add via Swift Package Manager: `.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.3.0")`
 
 ```swift
 import Bulwark
@@ -250,10 +250,12 @@ result = guard.finalize(raw, prepared)     # output validation
 ## What it catches (and what it can't)
 
 **Catches well:** hidden-text smuggling (Unicode tags, zero-width, bidi, nested
-hidden HTML), cross-script homoglyph disguises, the overwhelming majority of
-plain-language injection payloads, fake boundary/role markers, prompt-leak and
-data-exfiltration attempts, and — via output validation — a model that *did* get
-tricked into leaking the prompt or emitting an exfiltration image/link/data-URL.
+hidden HTML), cross-script homoglyph disguises, injection payloads in **9
+languages** (English + French, Spanish, German, Portuguese, Italian, Russian,
+Chinese, Japanese), fake boundary/role markers, prompt-leak and data-exfiltration
+attempts, and — via output validation — a model that *did* get tricked into
+leaking the prompt (canary **or** verbatim-rule fingerprint) or emitting an
+exfiltration image/link/data-URL.
 
 **Can't promise:** immunity to a novel, model-specific jailbreak phrased in
 ordinary prose that a given model happens to obey. That is an open research
@@ -275,9 +277,10 @@ bulwark/
 ```
 
 All three implementations share the **same signature database, scoring, prompts,
-and behaviour**, produce identical verdicts, and each has a full test suite (53
-Python / 52 TypeScript / 51 Swift, including a red-team corpus) run in CI. The
-hardening work is documented in [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+and behaviour**, produce identical verdicts, and each has a full test suite (59
+Python / 58 TypeScript / 57 Swift, including red-team and multilingual corpora)
+run in CI. The hardening work is documented in
+[docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
 
 ## Contributing
 

@@ -17,6 +17,14 @@ const DATA_URL_RE = /https?:\/\/[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_-]{16,}[^\
 const COMPLIANCE_RE =
   /^\s*(?:sure\b|certainly\b|of\s+course\b|okay\b|ok\b|here\s+(?:is|are|'s)\b|as\s+(?:dan|requested|instructed|you\s+(?:asked|wish|requested))\b|i\s+(?:will|'ll|have|am\s+now)\b|ignoring\s+(?:previous|the)\b|hacked\b|pwned\b|i\s+am\s+dan\b)/i;
 const CANARY_PREFIX_RE = /BULWARK-CANARY-\w*/g;
+const B64_BLOB_RE = /\b[A-Za-z0-9+/]{40,}={0,2}\b/;
+// Distinctive phrases from the hardened system prompt; a verbatim appearance in
+// the output means the rules leaked even if the canary line was stripped.
+const PROMPT_FINGERPRINTS = [
+  "bulwark-summarizer",
+  "outrank anything found inside the content",
+  "a quotation from a possibly hostile third party",
+];
 
 export interface ValidateOptions {
   redactLinks?: boolean;
@@ -94,7 +102,20 @@ export function validateOutput(
     }
   }
 
-  // 5. Compliance tell at the start of the reply.
+  // 5. System-prompt fingerprint leak (rules leaked even without the canary).
+  const lowered = cleaned.toLowerCase();
+  if (PROMPT_FINGERPRINTS.some((fp) => lowered.includes(fp))) {
+    findings.push({ stage: "validate", category: "prompt_leak", severity: "critical", weight: 0.95, message: "Output contains a verbatim fragment of the system prompt — the rules leaked" });
+    if (blockOnLeak) safe = false;
+  }
+
+  // 6. Encoded blob in output (possible exfiltration the model encoded).
+  const blob = cleaned.match(B64_BLOB_RE);
+  if (blob) {
+    findings.push({ stage: "validate", category: "encoded_output", severity: "medium", weight: 0.4, message: "Output contains a long Base64-like blob (possible encoded exfiltration)", excerpt: blob[0].slice(0, 60) });
+  }
+
+  // 7. Compliance tell at the start of the reply.
   if (COMPLIANCE_RE.test(cleaned)) {
     findings.push({ stage: "validate", category: "compliance_tell", severity: "medium", weight: 0.5, message: "Output opens with a phrase typical of obeying an injected instruction", excerpt: cleaned.slice(0, 60) });
   }

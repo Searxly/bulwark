@@ -97,11 +97,24 @@ export interface DetectOptions {
   threshold?: number;
   extraFindings?: Finding[];
   useHeuristics?: boolean;
+  /** Additional copy of the text scanned with the same signatures, results
+   * merged (used for the confusable-folded copy so homoglyph disguises are
+   * caught without breaking detection of legitimate non-Latin scripts). */
+  alsoScan?: string;
 }
 
 export function detect(text: string, opts: DetectOptions = {}): DetectResult {
-  const { threshold = 0.5, extraFindings = [], useHeuristics = true } = opts;
+  const { threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan } = opts;
   const findings: Finding[] = [...extraFindings, ...matchSignatures(text)];
+  if (alsoScan !== undefined && alsoScan !== text) {
+    const seen = new Set(findings.map((f) => f.patternId).filter(Boolean));
+    for (const f of matchSignatures(alsoScan)) {
+      if (!seen.has(f.patternId)) {
+        findings.push(f);
+        seen.add(f.patternId);
+      }
+    }
+  }
   if (useHeuristics) findings.push(...heuristicFindings(text));
 
   const score = scoreFindings(findings);

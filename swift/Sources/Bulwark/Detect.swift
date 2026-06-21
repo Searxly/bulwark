@@ -81,17 +81,29 @@ public struct DetectOptions {
     public var threshold: Double
     public var extraFindings: [Finding]
     public var useHeuristics: Bool
+    /// Additional copy of the text scanned with the same signatures, merged
+    /// (used for the confusable-folded copy so homoglyph disguises are caught
+    /// without breaking detection of legitimate non-Latin scripts).
+    public var alsoScan: String?
 
-    public init(threshold: Double = 0.5, extraFindings: [Finding] = [], useHeuristics: Bool = true) {
+    public init(threshold: Double = 0.5, extraFindings: [Finding] = [], useHeuristics: Bool = true, alsoScan: String? = nil) {
         self.threshold = threshold
         self.extraFindings = extraFindings
         self.useHeuristics = useHeuristics
+        self.alsoScan = alsoScan
     }
 }
 
 public func detect(_ text: String, options: DetectOptions = DetectOptions()) -> DetectResult {
     var findings = options.extraFindings
     findings.append(contentsOf: matchSignatures(text))
+    if let also = options.alsoScan, also != text {
+        var seen = Set(findings.compactMap { $0.patternId })
+        for f in matchSignatures(also) where !(f.patternId.map { seen.contains($0) } ?? false) {
+            findings.append(f)
+            if let pid = f.patternId { seen.insert(pid) }
+        }
+    }
     if options.useHeuristics { findings.append(contentsOf: heuristicFindings(text)) }
 
     let score = scoreFindings(findings)

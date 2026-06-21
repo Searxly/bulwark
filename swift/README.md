@@ -17,7 +17,7 @@ https://github.com/Myrhex-x/bulwark
 In `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.2.0")
+.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.3.0")
 ```
 
 …and add `"Bulwark"` to your target's dependencies. In Xcode: *File ▸ Add

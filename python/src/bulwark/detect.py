@@ -116,14 +116,24 @@ def scan(
     threshold: float = 0.5,
     extra_findings: Sequence[Finding] = (),
     use_heuristics: bool = True,
+    also_scan: "str | None" = None,
 ) -> DetectResult:
     """Detect injection signals in ``text`` and produce a :class:`DetectResult`.
 
     ``extra_findings`` (e.g. from sanitization) are included in the score so the
-    result reflects every signal Bulwark has seen.
+    result reflects every signal Bulwark has seen. ``also_scan`` is an additional
+    copy of the text run through the same signatures with results merged (used to
+    scan the confusable-folded text so homoglyph disguises are caught *without*
+    breaking detection of legitimate non-Latin scripts on the primary text).
     """
     findings: List[Finding] = list(extra_findings)
     findings.extend(match_signatures(text))
+    if also_scan is not None and also_scan != text:
+        seen = {f.pattern_id for f in findings if f.pattern_id}
+        for f in match_signatures(also_scan):
+            if f.pattern_id not in seen:
+                findings.append(f)
+                seen.add(f.pattern_id)
     if use_heuristics:
         findings.extend(heuristic_findings(text))
 

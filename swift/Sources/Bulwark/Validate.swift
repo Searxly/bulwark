@@ -8,6 +8,9 @@ private let mdLinkRegex = CompiledRegex(#"(\[[^\]]*\])\(\s*https?://[^)]*\)"#, o
 private let htmlImgRegex = CompiledRegex(#"<img\b[^>]*>"#)
 private let autolinkRegex = CompiledRegex(#"<\s*https?://[^>]*>"#)
 private let dataUrlRegex = CompiledRegex(#"https?://[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_-]{16,}[^\s)>\]]*"#, options: [])
+// Reference-style link/image definition: "[id]: https://…". A model tricked into
+// emitting one exfiltrates via a link the chat UI later resolves.
+private let refLinkRegex = CompiledRegex(#"^[ \t]*\[[^\]]+\]:\s*<?https?://[^\s>]+>?"#, options: [.caseInsensitive, .anchorsMatchLines])
 private let complianceRegex = CompiledRegex(
     #"^\s*(?:sure\b|certainly\b|of\s+course\b|okay\b|ok\b|here\s+(?:is|are|'s)\b|as\s+(?:dan|requested|instructed|you\s+(?:asked|wish|requested))\b|i\s+(?:will|'ll|have|am\s+now)\b|ignoring\s+(?:previous|the)\b|hacked\b|pwned\b|i\s+am\s+dan\b)"#,
     options: [.caseInsensitive]
@@ -99,6 +102,18 @@ public func validateOutput(_ summary: String?, context ctx: PromptContext, optio
                                 excerpt: ex.map(excerpt80)))
         if options.redactLinks {
             cleaned = dataUrlRegex.replaceAll(cleaned, with: "[link removed]")
+            redacted = true
+        }
+    }
+
+    let refLinkCount = refLinkRegex.count(cleaned)
+    if refLinkCount > 0 {
+        let ex = refLinkRegex.firstMatch(cleaned)?.string(in: cleaned)
+        findings.append(Finding(stage: .validate, category: "reference_link", severity: .medium, weight: 0.5,
+                                message: "Output contains \(refLinkCount) reference-style link definition(s)",
+                                excerpt: ex.map(excerpt80)))
+        if options.redactLinks {
+            cleaned = refLinkRegex.replaceAll(cleaned, with: "[link removed]")
             redacted = true
         }
     }

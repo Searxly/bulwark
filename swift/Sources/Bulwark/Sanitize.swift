@@ -35,6 +35,24 @@ public func foldConfusables(_ text: String) -> String {
     String(text.map { confusables[$0] ?? $0 })
 }
 
+// Leetspeak / digit-substitution → ASCII letters (1:1, offsets stay aligned).
+// Attackers swap letters for look-alike digits/symbols ("1gn0r3 pr3v10us") to
+// dodge keyword filters while the model still reads the word. Detection-only.
+private let leet: [Character: Character] = [
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
+]
+
+/// Map common leetspeak substitutions to ASCII letters. Detection-only.
+public func foldLeet(_ text: String) -> String {
+    String(text.map { leet[$0] ?? $0 })
+}
+
+/// Detector's second-pass copy: fold leetspeak, then cross-script homoglyphs.
+/// Both are 1:1 so detection offsets stay aligned. Detection-only.
+public func foldDetection(_ text: String) -> String {
+    foldConfusables(foldLeet(text))
+}
+
 private let wsRegex = CompiledRegex(#"[^\S\n]+"#, options: [])
 private let blanklinesRegex = CompiledRegex(#"\n{3,}"#, options: [])
 private let htmlishRegex = CompiledRegex(#"<(?:/?[a-zA-Z][\w:-]*\b|!--)"#, options: [.caseInsensitive])

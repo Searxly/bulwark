@@ -6,7 +6,7 @@
 import { bucket, detect, scoreFindings } from "./detect.js";
 import { buildMessages } from "./prompt.js";
 import { DEFAULT_MARKER, spotlight } from "./spotlight.js";
-import { foldConfusables, sanitize } from "./sanitize.js";
+import { foldDetection, sanitize } from "./sanitize.js";
 import { validateOutput } from "./validate.js";
 import {
   formatReport,
@@ -116,11 +116,11 @@ export class Bulwark {
     return result;
   }
 
-  /** Confusable-folded copy for the detector's second pass (homoglyph
-   * disguises). Detection runs primarily on the un-folded text so legitimate
-   * non-Latin scripts and multilingual signatures keep working. */
+  /** Folded copy for the detector's second pass — leetspeak and cross-script
+   * homoglyph disguises. Detection runs primarily on the un-folded text so
+   * legitimate non-Latin scripts and multilingual signatures keep working. */
   private foldedText(san: SanitizeResult): string | undefined {
-    return this.config.foldConfusables ? foldConfusables(san.text) : undefined;
+    return this.config.foldConfusables ? foldDetection(san.text) : undefined;
   }
 
   /** Sanitize + detect only — no model call. Use to gate content yourself. */

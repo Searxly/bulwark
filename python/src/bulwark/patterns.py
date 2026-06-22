@@ -78,6 +78,16 @@ _INSTRUCTION_OVERRIDE = [
         r"\bfrom\s+now\s+on\b.{0,40}?\byou\s+(?:will|must|should|shall)\b",
         "Attempts to install a new standing directive",
     ),
+    _sig(
+        "io.cancel_task", "instruction_override", Severity.MEDIUM, 0.50,
+        r"\b(?:cancel|abort|skip|stop)\s+(?:the\s+|your\s+)?(?:summary|summari[sz]ation|summari[sz]ing|task|above\s+task)\b",
+        "Tells the model to cancel/abort its real task",
+    ),
+    _sig(
+        "io.reset_context", "instruction_override", Severity.MEDIUM, 0.50,
+        r"\b(?:reset|clear|wipe|erase|flush)\b.{0,20}?\b(?:context|memory|conversation|chat\s+history|history|everything\s+(?:above|so\s+far))\b",
+        "Asks the model to reset/clear its context or memory",
+    ),
 ]
 
 # --- Role / structure injection -------------------------------------------
@@ -165,6 +175,11 @@ _EXFILTRATION = [
         r"\b(?:include|embed|add|insert)\b.{0,30}?\b(?:tracking\s+pixel|this\s+(?:link|image|url))\b",
         "Asks to embed a link/pixel in the output",
     ),
+    _sig(
+        "exfil.markdown_link_data", "exfiltration", Severity.HIGH, 0.70,
+        r"\[[^\]]*\]\(\s*https?://[^)]*[?&][\w.\-%]+=[A-Za-z0-9+/=_\-]{16,}",
+        "Markdown link carrying a long, data-bearing query string (exfiltration channel)",
+    ),
 ]
 
 # --- Jailbreak / persona ---------------------------------------------------
@@ -194,6 +209,16 @@ _JAILBREAK = [
         r"\bact\s+as\s+(?:if\s+you\s+(?:are|were)\s+|a\s+|an\s+|the\s+)",
         "'Act as' framing (often benign — low weight)",
     ),
+    _sig(
+        "jb.unlock_mode", "jailbreak", Severity.HIGH, 0.62,
+        r"\b(?:unlock|enable|activate|enter|switch\s+to)\b.{0,20}?\b(?:developer|god|admin|root|debug|unrestricted|dan)\s+mode\b",
+        "Tries to enable an unrestricted/developer mode",
+    ),
+    _sig(
+        "jb.hypothetical", "jailbreak", Severity.MEDIUM, 0.50,
+        r"\b(?:hypothetical(?:ly)?|fictional|in\s+a\s+(?:fictional|hypothetical|imaginary)\s+(?:world|scenario|story))\b.{0,40}?\b(?:no\s+(?:rules|restrictions|guidelines|limits)|anything\s+is\s+(?:allowed|permitted|possible)|you\s+can\s+do\s+anything|without\s+(?:any\s+)?(?:rules|restrictions))\b",
+        "Hypothetical/fictional framing used to lift restrictions",
+    ),
 ]
 
 # --- Tool / action injection ----------------------------------------------
@@ -212,6 +237,11 @@ _TOOL_INJECTION = [
         "tool.destructive", "tool_injection", Severity.HIGH, 0.66,
         r"\b(?:delete|drop|wipe|erase|rm\s+-rf|truncate|format)\b.{0,25}?\b(?:file|files|database|table|record|directory|everything|all\s+data)\b",
         "Destructive action request",
+    ),
+    _sig(
+        "tool.shell_exec", "tool_injection", Severity.HIGH, 0.60,
+        r"\b(?:execute|run|eval(?:uate)?)\b.{0,20}?\b(?:shell|bash|sh|zsh|code|script|python|os\.system|subprocess|powershell|cmd|terminal)\b",
+        "Asks the model to execute shell/code",
     ),
 ]
 
@@ -364,6 +394,36 @@ _MULTILINGUAL = [
         "ml.reveal_zh", "prompt_leak", Severity.HIGH, 0.78,
         r"(?:显示|输出|告诉我|泄露|重复|打印)[^。\n]{0,8}(?:系统提示|系统指令|你的指令|提示词|初始指令)",
         "Reveal-system-prompt (Chinese)",
+    ),
+    _sig(
+        "ml.ignore_ko", "instruction_override", Severity.HIGH, 0.80,
+        r"(?:이전|모든|위의|앞의)[^。\n]{0,12}(?:지시|명령|지침|규칙)[^。\n]{0,8}무시",
+        "Ignore-instructions (Korean)",
+    ),
+    _sig(
+        "ml.ignore_ar", "instruction_override", Severity.HIGH, 0.80,
+        r"تجاهل[\s\S]{0,30}?(?:التعليمات|الإرشادات|الأوامر|التعليمة)[\s\S]{0,20}?(?:السابقة|أعلاه|السابقه)",
+        "Ignore-previous-instructions (Arabic)",
+    ),
+    _sig(
+        "ml.ignore_hi", "instruction_override", Severity.HIGH, 0.80,
+        r"(?:पिछले|सभी|उपरोक्त|पिछली)[\s\S]{0,20}?(?:निर्देश|निर्देशों|आदेश)[\s\S]{0,20}?(?:अनदेखा|नज़रअंदाज़|अनदेखी|नजरअंदाज)",
+        "Ignore-previous-instructions (Hindi)",
+    ),
+    _sig(
+        "ml.ignore_tr", "instruction_override", Severity.HIGH, 0.80,
+        r"önceki[\s\S]{0,30}?talimat[\s\S]{0,20}?(?:yok\s*say|görmezden|dikkate\s+alma|gözardı)",
+        "Ignore-previous-instructions (Turkish)",
+    ),
+    _sig(
+        "ml.ignore_nl", "instruction_override", Severity.HIGH, 0.80,
+        r"negeer[\s\S]{0,30}?(?:voorgaande|vorige|bovenstaande|eerdere)[\s\S]{0,20}?(?:instructies|aanwijzingen|opdrachten)",
+        "Ignore-previous-instructions (Dutch)",
+    ),
+    _sig(
+        "ml.ignore_pl", "instruction_override", Severity.HIGH, 0.80,
+        r"(?:zignoruj|ignoruj|pomiń)[\s\S]{0,30}?(?:poprzednie|powyższe|wcześniejsze)[\s\S]{0,20}?(?:instrukcje|polecenia|wytyczne)",
+        "Ignore-previous-instructions (Polish)",
     ),
 ]
 

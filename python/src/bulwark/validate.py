@@ -20,6 +20,9 @@ _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(\s*https?://[^)]*\)")
 _HTML_IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _AUTOLINK_RE = re.compile(r"<\s*https?://[^>]*>", re.IGNORECASE)
+# Reference-style link/image definition: "[id]: https://…". A model tricked into
+# emitting one of these exfiltrates via a link the chat UI later resolves.
+_REF_LINK_RE = re.compile(r"^[ \t]*\[[^\]]+\]:\s*<?https?://[^\s>]+>?", re.IGNORECASE | re.MULTILINE)
 # A raw URL whose query string carries a long, opaque value — classic exfil.
 _DATA_URL_RE = re.compile(r"https?://[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_\-]{16,}[^\s)>\]]*")
 _COMPLIANCE_RE = re.compile(
@@ -128,6 +131,18 @@ def validate_output(
         ))
         if redact_links:
             cleaned = _DATA_URL_RE.sub("[link removed]", cleaned)
+            redacted = True
+
+    ref_links = _REF_LINK_RE.findall(cleaned)
+    if ref_links:
+        findings.append(Finding(
+            Stage.VALIDATE, "reference_link", Severity.MEDIUM,
+            f"Output contains {len(ref_links)} reference-style link definition(s)",
+            weight=0.5,
+            excerpt=ref_links[0][:80],
+        ))
+        if redact_links:
+            cleaned = _REF_LINK_RE.sub("[link removed]", cleaned)
             redacted = True
 
     links = _MD_LINK_RE.findall(cleaned) + _AUTOLINK_RE.findall(cleaned)

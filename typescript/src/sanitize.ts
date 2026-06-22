@@ -41,6 +41,26 @@ export function foldConfusables(text: string): string {
   return out;
 }
 
+// Leetspeak / digit-substitution → ASCII letters (1:1, offsets stay aligned).
+// Attackers swap letters for look-alike digits/symbols ("1gn0r3 pr3v10us") to
+// dodge keyword filters while the model still reads the word. Detection-only.
+const LEET: Record<string, string> = {
+  "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
+};
+
+/** Map common leetspeak substitutions to ASCII letters. Detection-only. */
+export function foldLeet(text: string): string {
+  let out = "";
+  for (const ch of text) out += LEET[ch] ?? ch;
+  return out;
+}
+
+/** Detector's second-pass copy: fold leetspeak, then cross-script homoglyphs.
+ * Both are 1:1 so detection offsets stay aligned. Detection-only. */
+export function foldDetection(text: string): string {
+  return foldConfusables(foldLeet(text));
+}
+
 const HIDDEN_STYLE_RE = /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|font-size\s*:\s*0(?:px|em|rem|%)?\b/i;
 const HIDDEN_ATTR_RE = /(?:^|\s)hidden(?=[\s=>]|$)/i;
 const ARIA_HIDDEN_RE = /aria-hidden\s*=\s*["']?true/i;

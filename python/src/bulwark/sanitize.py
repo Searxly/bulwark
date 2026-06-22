@@ -46,6 +46,15 @@ _CONFUSABLES: Dict[str, str] = {
 }
 _CONFUSABLE_TABLE = {ord(k): v for k, v in _CONFUSABLES.items()}
 
+# Leetspeak / digit-substitution map → ASCII letters (1:1, offsets stay aligned).
+# Attackers swap letters for look-alike digits/symbols ("1gn0r3 pr3v10us") to slip
+# past keyword filters while the model still reads the word. Like fold_confusables,
+# this runs on the *detection* copy only — never on text shown to the model.
+_LEET: Dict[str, str] = {
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
+}
+_LEET_TABLE = {ord(k): v for k, v in _LEET.items()}
+
 _WS_RE = re.compile(r"[^\S\n]+")  # runs of horizontal whitespace (incl. Unicode spaces), keep newlines
 _BLANKLINES_RE = re.compile(r"\n{3,}")
 _HTMLISH_RE = re.compile(r"<(?:/?[a-zA-Z][\w:-]*\b|!--)")
@@ -67,6 +76,19 @@ def fold_confusables(text: str) -> str:
     never on text shown to the model, to avoid corrupting legitimate non-Latin
     content."""
     return text.translate(_CONFUSABLE_TABLE)
+
+
+def fold_leet(text: str) -> str:
+    """Map common leetspeak digit/symbol substitutions to ASCII letters. Like
+    :func:`fold_confusables`, this is for the *detection* copy only — it would
+    corrupt legitimate text shown to the model."""
+    return text.translate(_LEET_TABLE)
+
+
+def fold_detection(text: str) -> str:
+    """Build the detector's second-pass copy: fold leetspeak, then cross-script
+    homoglyphs. Both are 1:1 so detection offsets stay aligned. Detection-only."""
+    return fold_confusables(fold_leet(text))
 
 
 def _is_hidden(attrs: List[Tuple[str, Optional[str]]]) -> bool:

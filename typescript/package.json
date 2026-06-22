@@ -1,6 +1,6 @@
 {
   "name": "bulwark-guard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "An open-source safeguard against prompt injection in AI summarization.",
   "type": "module",
   "main": "./dist/index.js",
@@ -43,6 +43,6 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^4.1.9"
   }
 }

@@ -20,9 +20,10 @@ canonicalize text so detection can't be evaded with look-alikes.
   elements hidden via `display:none` / `visibility:hidden` / `opacity:0` /
   `aria-hidden`, then extracts text and unescapes entities.
 - **NFKC-normalizes** so `ｉｇｎｏｒｅ`, ﬁ-ligatures, etc. fold to canonical form, and
-  `fold_confusables` maps cross-script homoglyphs (Cyrillic/Greek look-alikes) to
-  ASCII for the **detection copy only** — the model-facing text is left intact so
-  legitimate non-Latin content is never corrupted.
+  `fold_confusables` maps cross-script homoglyphs (Cyrillic/Greek look-alikes)
+  while `fold_leet` maps leetspeak digit/symbol substitutions (`1gn0r3` →
+  `ignore`) to ASCII for the **detection copy only** — the model-facing text is
+  left intact so legitimate non-Latin content and numerals are never corrupted.
 - HTML is parsed with a **stack-based extractor** (stdlib `html.parser` in
   Python, a hand-written tokenizer in TS and Swift) that drops nested hidden
   subtrees correctly.
@@ -33,15 +34,16 @@ canonicalize text so detection can't be evaded with look-alikes.
 
 **Goal:** quantify how likely the text is an attack.
 
-- Runs a [signature database](../python/src/bulwark/patterns.py) of 58 regexes
-  (English + multilingual: fr/es/de/pt/it/ru/zh/ja) across categories:
-  `instruction_override`, `role_injection`, `prompt_leak`,
+- Runs a [signature database](../python/src/bulwark/patterns.py) of 70 regexes
+  (English + multilingual: fr/es/de/pt/it/ru/zh/ja/ko/ar/hi/tr/nl/pl) across
+  categories: `instruction_override`, `role_injection`, `prompt_leak`,
   `exfiltration`, `jailbreak`, `tool_injection`, `boundary_breakout`, `encoding`.
 - Adds **structural heuristics** (density of imperative-led lines, second-person
   directives).
 - Runs **two passes**: the signatures scan the un-folded text (so multilingual
-  and legitimate non-Latin scripts work) *and* a confusable-folded copy (so
-  homoglyph-disguised English is caught). Findings are merged, deduped by id.
+  and legitimate non-Latin scripts work) *and* a folded copy — leetspeak and
+  cross-script homoglyphs mapped back to ASCII — so `1gn0r3` and `іgnоrе` are
+  both caught. Findings are merged, deduped by id.
 - Combines every weighted signal — including the sanitize-stage findings — with a
   **noisy-OR**:
 
@@ -97,8 +99,9 @@ transforms:
 - **Prompt-fingerprint leak** → a verbatim fragment of the system prompt appears
   even though the canary was stripped → **unsafe**.
 - **Boundary-nonce leak** → confusion/leak → redacted.
-- **Exfiltration** — markdown images/links, HTML `<img>`, autolinks, raw URLs
-  with a data-bearing query string, and long Base64 blobs → stripped/flagged.
+- **Exfiltration** — markdown images/links (inline **and** reference-style
+  `[id]: …` definitions), HTML `<img>`, autolinks, raw URLs with a data-bearing
+  query string, and long Base64 blobs → stripped/flagged.
 - **Compliance tells** at the start of the reply → flagged.
 - Returns a possibly-redacted summary, a `safe` flag, and findings.
 

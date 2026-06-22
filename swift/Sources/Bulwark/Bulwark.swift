@@ -113,11 +113,11 @@ public struct Bulwark {
         return result
     }
 
-    /// Confusable-folded copy for the detector's second pass (homoglyph
-    /// disguises). Detection runs primarily on the un-folded text so legitimate
-    /// non-Latin scripts and multilingual signatures keep working.
+    /// Folded copy for the detector's second pass — leetspeak and cross-script
+    /// homoglyph disguises. Detection runs primarily on the un-folded text so
+    /// legitimate non-Latin scripts and multilingual signatures keep working.
     private func foldedText(_ san: SanitizeResult) -> String? {
-        config.foldConfusables ? foldConfusables(san.text) : nil
+        config.foldConfusables ? foldDetection(san.text) : nil
     }
 
     /// Sanitize + detect only — no model call. Use to gate content yourself.
@@ -192,10 +192,11 @@ public struct Bulwark {
 }
 
 /// Sanitize then detect injection in `text` — convenience, no model call.
-/// Detection runs on a confusable-folded copy so homoglyph disguises are caught.
+/// Detection runs on a folded copy so leetspeak ("1gn0r3") and homoglyph
+/// disguises are caught.
 public func scan(_ text: String, threshold: Double = 0.5) -> DetectResult {
     let s = sanitize(text)
-    return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldConfusables(s.text)))
+    return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldDetection(s.text)))
 }
 
-public let bulwarkVersion = "0.3.0"
+public let bulwarkVersion = "0.4.0"

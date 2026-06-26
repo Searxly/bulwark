@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 from . import detect as _detect
 from . import sanitize as _sanitize
 from . import spotlight as _spotlight
+from .patterns import Signature
 from .prompt import PromptContext, build_messages, make_canary
 from .types import (
     DetectResult,
@@ -53,6 +54,8 @@ class BulwarkConfig:
     use_heuristics: bool = True
     # Decode embedded Base64 blobs and scan the decoded payload too.
     decode_base64: bool = True
+    # Custom signatures appended to the built-in database (see make_signature).
+    extra_signatures: Sequence["Signature"] = ()
     # Refuse to call the model when risk reaches this severity (None = never
     # hard-block; rely on structural defences + output validation instead).
     block_before_llm: Optional[Severity] = None
@@ -140,6 +143,7 @@ class Bulwark:
             use_heuristics=self.config.use_heuristics,
             also_scan=self._folded_text(san),
             decode_base64=self.config.decode_base64,
+            extra_signatures=self.config.extra_signatures,
         )
 
     def prepare(self, content: str) -> "PreparedRequest":
@@ -152,6 +156,7 @@ class Bulwark:
             use_heuristics=self.config.use_heuristics,
             also_scan=self._folded_text(san),
             decode_base64=self.config.decode_base64,
+            extra_signatures=self.config.extra_signatures,
         )
         spot = _spotlight.spotlight(
             san.text,

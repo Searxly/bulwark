@@ -9,7 +9,7 @@ spotlight, harden, validate — so the content gets summarized and the attack
 inside it doesn't.
 
 Isomorphic (Node 18+, edge, browser), zero runtime dependencies.
-Full docs, threat model, and architecture: https://github.com/Myrhex-x/bulwark
+Full docs, threat model, and architecture: https://github.com/Searxly/bulwark
 
 ## Install
 

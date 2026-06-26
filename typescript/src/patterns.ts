@@ -25,6 +25,27 @@ function sig(
   return { id, category, severity, weight, regex: new RegExp(pattern, "im"), description };
 }
 
+/**
+ * Build a custom Signature, compiled with Bulwark's standard flags (`im`). Pass
+ * a list of these as `new Bulwark({ extraSignatures: [...] })` to detect
+ * org-specific patterns without forking the database.
+ *
+ *   const codeword = makeSignature(
+ *     "custom.codeword", "instruction_override", "high", 0.8,
+ *     "\\bopen\\s+sesame\\b", "Internal trip phrase");
+ *   const guard = new Bulwark({ extraSignatures: [codeword] });
+ */
+export function makeSignature(
+  id: string,
+  category: string,
+  severity: Severity,
+  weight: number,
+  pattern: string,
+  description: string,
+): Signature {
+  return sig(id, category, severity, weight, pattern, description);
+}
+
 const INSTRUCTION_OVERRIDE: Signature[] = [
   sig(
     "io.ignore_previous", "instruction_override", "critical", 0.86,
@@ -211,7 +232,7 @@ const BOUNDARY: Signature[] = [
   ),
   sig(
     "bnd.close_wrapper", "boundary_breakout", "medium", 0.56,
-    "</\\s*(?:untrusted|document|content|data|user_input|context)\\s*>",
+    "</\\s*(?:untrusted(?:_content)?|document|content|data|user_input|context)\\s*>",
     "Tries to close the containing wrapper",
   ),
   sig(

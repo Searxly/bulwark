@@ -12,7 +12,10 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -33,16 +36,16 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Myrhex-x/bulwark.git",
+    "url": "git+https://github.com/Searxly/bulwark.git",
     "directory": "typescript"
   },
-  "homepage": "https://github.com/Myrhex-x/bulwark#readme",
+  "homepage": "https://github.com/Searxly/bulwark#readme",
   "engines": {
     "node": ">=18"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.20.0",
     "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vitest": "^3.2.6"
   }
 }

@@ -30,9 +30,9 @@ classifiers = [
 dependencies = []  # zero runtime dependencies — the core is pure stdlib
 
 [project.urls]
-Homepage = "https://github.com/Myrhex-x/bulwark"
-Source = "https://github.com/Myrhex-x/bulwark"
-Issues = "https://github.com/Myrhex-x/bulwark/issues"
+Homepage = "https://github.com/Searxly/bulwark"
+Source = "https://github.com/Searxly/bulwark"
+Issues = "https://github.com/Searxly/bulwark/issues"
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]

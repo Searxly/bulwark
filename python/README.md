@@ -8,7 +8,7 @@ Bulwark wraps **any** model in five layers of defense — sanitize, detect,
 spotlight, harden, validate — so the content gets summarized and the attack
 inside it doesn't.
 
-Full docs, threat model, and architecture: https://github.com/Myrhex-x/bulwark
+Full docs, threat model, and architecture: https://github.com/Searxly/bulwark
 
 ## Install
 

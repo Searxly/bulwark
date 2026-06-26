@@ -126,9 +126,18 @@ so `result.risk_score` reflects everything Bulwark saw end-to-end.
 ### Configuration
 
 `BulwarkConfig` (Python) / `BulwarkConfig` object (TS) exposes every knob:
-HTML stripping, unicode normalization, detection threshold, pre-LLM block
-severity, spotlight methods, max words, language, and output redaction policy.
-Presets: `balanced` (default), `strict`, `paranoid`.
+HTML stripping, unicode normalization, detection threshold, Base64 decoding,
+pre-LLM block severity, spotlight methods, max words, language, output redaction
+policy, and `extra_signatures` (custom patterns built with `make_signature`,
+appended to the built-in database). Presets: `balanced` (default), `strict`,
+`paranoid`.
+
+## Evaluation
+
+[`eval/`](../eval/README.md) holds a labeled corpus and `run_eval.py`, which
+reports detection recall / precision / F1 with a per-group breakdown and an
+optional CI gate. It is the regression guard for signature changes: a new false
+positive (precision drop) is treated as the harder failure.
 
 ## Design principles
 

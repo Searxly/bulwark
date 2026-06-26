@@ -31,6 +31,7 @@ from .sanitize import (
     fold_for_detection,
     fold_leet,
 )
+from .patterns import SIGNATURES, Signature, make_signature
 from .sanitize import sanitize as sanitize_text
 from .spotlight import spotlight
 from .types import (
@@ -62,6 +63,9 @@ __all__ = [
     "validate_output",
     "score_findings",
     "bucket",
+    "make_signature",
+    "Signature",
+    "SIGNATURES",
     "PromptContext",
     "DetectResult",
     "Finding",
@@ -75,12 +79,13 @@ __all__ = [
 ]
 
 
-def scan(text: str, *, threshold: float = 0.5) -> DetectResult:
+def scan(text: str, *, threshold: float = 0.5, extra_signatures=()) -> DetectResult:
     """Sanitize then detect injection in ``text`` — convenience wrapper, no model call.
 
     Detection runs on a de-obfuscated copy (spaced-out letters joined, cross-script
     homoglyphs and leetspeak folded) and decodes embedded Base64 payloads, so the
-    common keyword-evasion tricks are caught.
+    common keyword-evasion tricks are caught. Pass ``extra_signatures`` (from
+    :func:`make_signature`) to add custom patterns.
     """
     result = sanitize_text(text)
     return _scan(
@@ -88,4 +93,5 @@ def scan(text: str, *, threshold: float = 0.5) -> DetectResult:
         threshold=threshold,
         extra_findings=result.findings,
         also_scan=fold_for_detection(result.text),
+        extra_signatures=extra_signatures,
     )

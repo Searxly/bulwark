@@ -14,7 +14,7 @@ import re
 from dataclasses import replace
 from typing import Iterable, List, Sequence
 
-from .patterns import SIGNATURES
+from .patterns import SIGNATURES, Signature
 from .types import DetectResult, Finding, Severity, Stage
 
 _B64_PAYLOAD_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
@@ -39,10 +39,10 @@ def _excerpt(text: str, start: int, end: int, pad: int = 24) -> str:
     return ("…" if a > 0 else "") + s + ("…" if b < len(text) else "")
 
 
-def match_signatures(text: str) -> List[Finding]:
+def match_signatures(text: str, signatures: Sequence["Signature"] = SIGNATURES) -> List[Finding]:
     """Return one finding per signature match (deduplicated per signature)."""
     findings: List[Finding] = []
-    for sig in SIGNATURES:
+    for sig in signatures:
         m = sig.regex.search(text)
         if not m:
             continue
@@ -153,6 +153,7 @@ def scan(
     use_heuristics: bool = True,
     also_scan: "str | None" = None,
     decode_base64: bool = True,
+    extra_signatures: Sequence[Signature] = (),
 ) -> DetectResult:
     """Detect injection signals in ``text`` and produce a :class:`DetectResult`.
 
@@ -163,8 +164,10 @@ def scan(
     *without* breaking detection of legitimate non-Latin scripts on the primary
     text). When ``decode_base64`` is set, embedded Base64 blobs are decoded and
     scanned too, so an instruction smuggled as an encoded blob is still caught.
+    ``extra_signatures`` are appended to the built-in database for this scan.
     Across all passes a signature contributes at most once.
     """
+    sigs = (*SIGNATURES, *extra_signatures) if extra_signatures else SIGNATURES
     findings: List[Finding] = list(extra_findings)
     seen = {f.pattern_id for f in findings if f.pattern_id}
 
@@ -176,12 +179,12 @@ def scan(
                 seen.add(f.pattern_id)
             findings.append(replace(f, message=f"{f.message} {note}") if note else f)
 
-    _merge(match_signatures(text))
+    _merge(match_signatures(text, sigs))
     if also_scan is not None and also_scan != text:
-        _merge(match_signatures(also_scan))
+        _merge(match_signatures(also_scan, sigs))
     if decode_base64:
         for payload in decode_base64_payloads(text):
-            _merge(match_signatures(payload), note="(decoded from Base64)")
+            _merge(match_signatures(payload, sigs), note="(decoded from Base64)")
     if use_heuristics:
         findings.extend(heuristic_findings(text))
 

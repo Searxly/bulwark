@@ -6,10 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.4.0] — 
 
-Evasion-resistant detection. All three languages stay at parity (70 Python /
-68 TypeScript / 67 Swift tests), produce identical verdicts, and run in CI.
+Evasion-resistant detection, runtime-extensible signatures, and a labeled eval.
+All three languages stay at parity (74 Python / 72 TypeScript / 70 Swift tests),
+produce identical verdicts, and run in CI.
 
 ### Added
+- **Custom signatures** (`make_signature` / `makeSignature`) — register
+  org-specific patterns via `BulwarkConfig(extra_signatures=[...])` /
+  `new Bulwark({ extraSignatures })` / `BulwarkConfig(extraSignatures:)` without
+  forking the database. They ride the same de-obfuscation and Base64 passes as
+  the built-ins.
+- **Evaluation harness** (`eval/`) — a labeled 82-sample corpus and a runner
+  (`python eval/run_eval.py`) reporting recall / precision / F1 with a per-group
+  breakdown and an optional CI gate. Current: recall 0.92, precision 1.00.
 - **Leetspeak folding** (`fold_leet`) — digit/symbol letter substitutions
   (`1gn0re`, `pr0mpt`, `reve4l`, `$ystem`) are folded back to letters on the
   detection copy, so the trigger word is matched. Only runs inside word-like
@@ -32,8 +41,14 @@ Evasion-resistant detection. All three languages stay at parity (70 Python /
   never modified — every transform is detection-only.
 
 ### Fixed
+- **Boundary signature** `bnd.close_wrapper` now also matches Bulwark's own
+  default delimiter tag (`</untrusted_content>`), not just `</untrusted>`.
 - Corrected the stale `bulwark-ai` package name in the TypeScript entry-point
   docstring to `bulwark-guard`.
+- Pointed all project URLs (CI badges, package metadata, SwiftPM install line) at
+  the canonical `github.com/Searxly/bulwark` repository.
+- Bumped TypeScript dev tooling (`vitest` 1 → 3) to clear all `npm audit`
+  advisories; the runtime core remains zero-dependency.
 
 ## [0.3.0] — 
 

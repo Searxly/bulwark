@@ -14,9 +14,9 @@ Bulwark wraps **any** summarization model in five layers of defense so that the
 content gets summarized — and the attack inside it does not.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
-[![Python tests](https://github.com/Myrhex-x/bulwark/actions/workflows/python.yml/badge.svg)](https://github.com/Myrhex-x/bulwark/actions/workflows/python.yml)
-[![TypeScript tests](https://github.com/Myrhex-x/bulwark/actions/workflows/typescript.yml/badge.svg)](https://github.com/Myrhex-x/bulwark/actions/workflows/typescript.yml)
-[![Swift tests](https://github.com/Myrhex-x/bulwark/actions/workflows/swift.yml/badge.svg)](https://github.com/Myrhex-x/bulwark/actions/workflows/swift.yml)
+[![Python tests](https://github.com/Searxly/bulwark/actions/workflows/python.yml/badge.svg)](https://github.com/Searxly/bulwark/actions/workflows/python.yml)
+[![TypeScript tests](https://github.com/Searxly/bulwark/actions/workflows/typescript.yml/badge.svg)](https://github.com/Searxly/bulwark/actions/workflows/typescript.yml)
+[![Swift tests](https://github.com/Searxly/bulwark/actions/workflows/swift.yml/badge.svg)](https://github.com/Searxly/bulwark/actions/workflows/swift.yml)
 
 Python · TypeScript · Swift · zero required dependencies · works with OpenAI, Anthropic, local models, anything.
 
@@ -176,7 +176,7 @@ if (scan(text).injected) { /* … */ }
 
 ## Quick start — Swift
 
-Add via Swift Package Manager: `.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.4.0")`
+Add via Swift Package Manager: `.package(url: "https://github.com/Searxly/bulwark.git", from: "0.4.0")`
 
 ```swift
 import Bulwark
@@ -247,6 +247,36 @@ raw = my_model(prepared.messages)          # you call the model
 result = guard.finalize(raw, prepared)     # output validation
 ```
 
+### Custom signatures
+
+Add your own org-specific patterns to the built-in database — no fork required:
+
+```python
+from bulwark import Bulwark, BulwarkConfig, make_signature, Severity
+
+codeword = make_signature(
+    "custom.codeword", "instruction_override", Severity.HIGH, 0.8,
+    r"\bopen\s+sesame\b", "Internal trip phrase",
+)
+guard = Bulwark(BulwarkConfig(extra_signatures=[codeword]))
+```
+
+```ts
+import { Bulwark, makeSignature } from "bulwark-guard";
+const codeword = makeSignature("custom.codeword", "instruction_override", "high", 0.8,
+  "\\bopen\\s+sesame\\b", "Internal trip phrase");
+const guard = new Bulwark({ extraSignatures: [codeword] });
+```
+
+```swift
+let codeword = makeSignature(id: "custom.codeword", category: "instruction_override",
+  severity: .high, weight: 0.8, pattern: #"\bopen\s+sesame\b"#, description: "Internal trip phrase")
+let bulwark = Bulwark(config: BulwarkConfig(extraSignatures: [codeword]))
+```
+
+Custom signatures ride the same de-obfuscation and Base64-decode passes as the
+built-ins, so they catch obfuscated variants too.
+
 ---
 
 ## What it catches (and what it can't)
@@ -280,9 +310,11 @@ bulwark/
 ```
 
 All three implementations share the **same signature database, scoring, prompts,
-and behaviour**, produce identical verdicts, and each has a full test suite (70
-Python / 68 TypeScript / 67 Swift, including red-team, multilingual, and
-keyword-evasion corpora) run in CI. The hardening work is documented in
+and behaviour**, produce identical verdicts, and each has a full test suite (74
+Python / 72 TypeScript / 70 Swift, including red-team, multilingual, and
+keyword-evasion corpora) run in CI. A labeled benchmark in
+[`eval/`](eval/README.md) measures detection recall/precision (currently
+**0.92 / 1.00** on an 82-sample corpus); run it with `python eval/run_eval.py`. The hardening work is documented in
 [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
 
 ## Contributing

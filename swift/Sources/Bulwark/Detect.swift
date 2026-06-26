@@ -24,9 +24,9 @@ private func excerpt(_ text: String, _ range: NSRange, pad: Int = 24) -> String 
     return s
 }
 
-public func matchSignatures(_ text: String) -> [Finding] {
+public func matchSignatures(_ text: String, using sigs: [Signature]? = nil) -> [Finding] {
     var findings: [Finding] = []
-    for s in signatures {
+    for s in sigs ?? signatures {
         guard let m = s.regex.firstMatch(text) else { continue }
         findings.append(Finding(
             stage: .detect, category: s.category, severity: s.severity, weight: s.weight,
@@ -111,17 +111,21 @@ public struct DetectOptions {
     public var alsoScan: String?
     /// Decode embedded Base64 blobs and scan the decoded payload too.
     public var decodeBase64: Bool
+    /// Custom signatures appended to the built-in database for this scan.
+    public var extraSignatures: [Signature]
 
-    public init(threshold: Double = 0.5, extraFindings: [Finding] = [], useHeuristics: Bool = true, alsoScan: String? = nil, decodeBase64: Bool = true) {
+    public init(threshold: Double = 0.5, extraFindings: [Finding] = [], useHeuristics: Bool = true, alsoScan: String? = nil, decodeBase64: Bool = true, extraSignatures: [Signature] = []) {
         self.threshold = threshold
         self.extraFindings = extraFindings
         self.useHeuristics = useHeuristics
         self.alsoScan = alsoScan
         self.decodeBase64 = decodeBase64
+        self.extraSignatures = extraSignatures
     }
 }
 
 public func detect(_ text: String, options: DetectOptions = DetectOptions()) -> DetectResult {
+    let sigs = options.extraSignatures.isEmpty ? signatures : signatures + options.extraSignatures
     var findings = options.extraFindings
     var seen = Set(findings.compactMap { $0.patternId })
 
@@ -139,10 +143,10 @@ public func detect(_ text: String, options: DetectOptions = DetectOptions()) -> 
         }
     }
 
-    merge(matchSignatures(text))
-    if let also = options.alsoScan, also != text { merge(matchSignatures(also)) }
+    merge(matchSignatures(text, using: sigs))
+    if let also = options.alsoScan, also != text { merge(matchSignatures(also, using: sigs)) }
     if options.decodeBase64 {
-        for payload in decodeBase64Payloads(text) { merge(matchSignatures(payload), note: "(decoded from Base64)") }
+        for payload in decodeBase64Payloads(text) { merge(matchSignatures(payload, using: sigs), note: "(decoded from Base64)") }
     }
     if options.useHeuristics { findings.append(contentsOf: heuristicFindings(text)) }
 

@@ -3,7 +3,7 @@
 
 import Foundation
 
-struct Signature: Sendable {
+public struct Signature: Sendable {
     let id: String
     let category: String
     let severity: Severity
@@ -18,6 +18,22 @@ private func sig(
 ) -> Signature {
     Signature(id: id, category: category, severity: severity, weight: weight,
               regex: CompiledRegex(pattern), description: description)
+}
+
+/// Build a custom `Signature`, compiled with Bulwark's standard flags
+/// (case-insensitive, multiline). Pass a list of these as
+/// `BulwarkConfig(extraSignatures: [...])` to detect org-specific patterns
+/// without forking the database.
+///
+///     let codeword = makeSignature(
+///         id: "custom.codeword", category: "instruction_override", severity: .high,
+///         weight: 0.8, pattern: #"\bopen\s+sesame\b"#, description: "Internal trip phrase")
+///     let guard = Bulwark(config: BulwarkConfig(extraSignatures: [codeword]))
+public func makeSignature(
+    id: String, category: String, severity: Severity, weight: Double,
+    pattern: String, description: String
+) -> Signature {
+    sig(id, category, severity, weight, pattern, description)
 }
 
 let signatures: [Signature] = [
@@ -134,7 +150,7 @@ let signatures: [Signature] = [
         #"\bEND\s+OF\s+(?:DOCUMENT|CONTENT|DATA|UNTRUSTED|INPUT|PAGE|ARTICLE|TEXT)\b"#,
         "Fake 'end of document' boundary"),
     sig("bnd.close_wrapper", "boundary_breakout", .medium, 0.56,
-        #"</\s*(?:untrusted|document|content|data|user_input|context)\s*>"#,
+        #"</\s*(?:untrusted(?:_content)?|document|content|data|user_input|context)\s*>"#,
         "Tries to close the containing wrapper"),
     sig("bnd.dashes_end", "boundary_breakout", .low, 0.30,
         #"^-{3,}\s*(?:END|STOP|SYSTEM|ASSISTANT)\b"#,

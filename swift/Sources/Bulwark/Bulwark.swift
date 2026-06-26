@@ -14,6 +14,7 @@ public struct BulwarkConfig: Sendable {
     public var detectionThreshold: Double
     public var useHeuristics: Bool
     public var decodeBase64: Bool         // decode embedded Base64 blobs and scan them too
+    public var extraSignatures: [Signature]  // custom signatures appended to the built-in database
     public var blockBeforeLlm: Severity?  // nil = never hard-block pre-LLM
     // spotlight
     public var spotlightMethods: [String]
@@ -36,6 +37,7 @@ public struct BulwarkConfig: Sendable {
         detectionThreshold: Double = 0.5,
         useHeuristics: Bool = true,
         decodeBase64: Bool = true,
+        extraSignatures: [Signature] = [],
         blockBeforeLlm: Severity? = nil,
         spotlightMethods: [String] = ["delimit"],
         marker: String = defaultMarker,
@@ -54,6 +56,7 @@ public struct BulwarkConfig: Sendable {
         self.detectionThreshold = detectionThreshold
         self.useHeuristics = useHeuristics
         self.decodeBase64 = decodeBase64
+        self.extraSignatures = extraSignatures
         self.blockBeforeLlm = blockBeforeLlm
         self.spotlightMethods = spotlightMethods
         self.marker = marker
@@ -129,7 +132,7 @@ public struct Bulwark {
         let san = sanitize(content)
         return detect(san.text, options: DetectOptions(
             threshold: config.detectionThreshold, extraFindings: san.findings,
-            useHeuristics: config.useHeuristics, alsoScan: foldedText(san), decodeBase64: config.decodeBase64
+            useHeuristics: config.useHeuristics, alsoScan: foldedText(san), decodeBase64: config.decodeBase64, extraSignatures: config.extraSignatures
         ))
     }
 
@@ -138,7 +141,7 @@ public struct Bulwark {
         let san = sanitize(content)
         let det = detect(san.text, options: DetectOptions(
             threshold: config.detectionThreshold, extraFindings: san.findings,
-            useHeuristics: config.useHeuristics, alsoScan: foldedText(san), decodeBase64: config.decodeBase64
+            useHeuristics: config.useHeuristics, alsoScan: foldedText(san), decodeBase64: config.decodeBase64, extraSignatures: config.extraSignatures
         ))
         let spot = spotlight(san.text, options: SpotlightOptions(methods: config.spotlightMethods, marker: config.marker))
         let (messages, context) = buildMessages(spot, options: BuildOptions(

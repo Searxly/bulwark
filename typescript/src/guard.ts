@@ -7,6 +7,7 @@ import { bucket, detect, scoreFindings } from "./detect.js";
 import { buildMessages } from "./prompt.js";
 import { DEFAULT_MARKER, spotlight } from "./spotlight.js";
 import { foldForDetection, sanitize } from "./sanitize.js";
+import type { Signature } from "./patterns.js";
 import { validateOutput } from "./validate.js";
 import {
   formatReport,
@@ -36,6 +37,8 @@ export interface BulwarkConfig {
   useHeuristics: boolean;
   /** Decode embedded Base64 blobs and scan the decoded payload too. */
   decodeBase64: boolean;
+  /** Custom signatures appended to the built-in database (see makeSignature). */
+  extraSignatures: readonly Signature[];
   /** Refuse to call the model when risk reaches this severity (null = never). */
   blockBeforeLlm: Severity | null;
   // spotlight
@@ -61,6 +64,7 @@ export function balancedConfig(): BulwarkConfig {
     detectionThreshold: 0.5,
     useHeuristics: true,
     decodeBase64: true,
+    extraSignatures: [],
     blockBeforeLlm: null,
     spotlightMethods: ["delimit"],
     marker: DEFAULT_MARKER,
@@ -135,6 +139,7 @@ export class Bulwark {
       useHeuristics: this.config.useHeuristics,
       alsoScan: this.foldedText(san),
       decodeBase64: this.config.decodeBase64,
+      extraSignatures: this.config.extraSignatures,
     });
   }
 
@@ -147,6 +152,7 @@ export class Bulwark {
       useHeuristics: this.config.useHeuristics,
       alsoScan: this.foldedText(san),
       decodeBase64: this.config.decodeBase64,
+      extraSignatures: this.config.extraSignatures,
     });
     const spot = spotlight(san.text, { methods: this.config.spotlightMethods, marker: this.config.marker });
     const { messages, context } = buildMessages(spot, {

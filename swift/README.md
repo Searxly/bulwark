@@ -10,14 +10,14 @@ inside it doesn't.
 
 Pure Swift + Foundation, no third-party dependencies. Works on macOS, iOS,
 tvOS, watchOS (and Linux). Full docs, threat model, and architecture:
-https://github.com/Myrhex-x/bulwark
+https://github.com/Searxly/bulwark
 
 ## Install (Swift Package Manager)
 
 In `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.4.0")
+.package(url: "https://github.com/Searxly/bulwark.git", from: "0.4.0")
 ```
 
 …and add `"Bulwark"` to your target's dependencies. In Xcode: *File ▸ Add

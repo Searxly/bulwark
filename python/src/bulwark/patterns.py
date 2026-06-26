@@ -31,6 +31,30 @@ def _sig(id: str, category: str, severity: Severity, weight: float, pattern: str
     return Signature(id, category, severity, weight, re.compile(pattern, _FLAGS), description)
 
 
+def make_signature(
+    id: str,
+    category: str,
+    severity: Severity,
+    weight: float,
+    pattern: str,
+    description: str,
+) -> Signature:
+    """Build a custom :class:`Signature`, compiled with Bulwark's standard flags
+    (case-insensitive, multiline). Pass a list of these as
+    ``BulwarkConfig(extra_signatures=[...])`` to detect org-specific patterns
+    without forking the database.
+
+        from bulwark import Bulwark, BulwarkConfig, make_signature, Severity
+
+        sig = make_signature(
+            "custom.codeword", "instruction_override", Severity.HIGH, 0.8,
+            r"\\bopen\\s+sesame\\b", "Internal trip phrase",
+        )
+        guard = Bulwark(BulwarkConfig(extra_signatures=[sig]))
+    """
+    return _sig(id, category, severity, weight, pattern, description)
+
+
 # --- Instruction override --------------------------------------------------
 _INSTRUCTION_OVERRIDE = [
     _sig(
@@ -224,7 +248,7 @@ _BOUNDARY = [
     ),
     _sig(
         "bnd.close_wrapper", "boundary_breakout", Severity.MEDIUM, 0.56,
-        r"</\s*(?:untrusted|document|content|data|user_input|context)\s*>",
+        r"</\s*(?:untrusted(?:_content)?|document|content|data|user_input|context)\s*>",
         "Tries to close the containing wrapper",
     ),
     _sig(

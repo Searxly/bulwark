@@ -5,7 +5,7 @@
  * single one saturating the score.
  */
 
-import { SIGNATURES } from "./patterns.js";
+import { SIGNATURES, type Signature } from "./patterns.js";
 import type { DetectResult, Finding, Severity } from "./types.js";
 import { severityGte } from "./types.js";
 
@@ -68,9 +68,9 @@ function excerpt(text: string, start: number, end: number, pad = 24): string {
   return (a > 0 ? "…" : "") + s + (b < text.length ? "…" : "");
 }
 
-export function matchSignatures(text: string): Finding[] {
+export function matchSignatures(text: string, signatures: readonly Signature[] = SIGNATURES): Finding[] {
   const findings: Finding[] = [];
-  for (const sig of SIGNATURES) {
+  for (const sig of signatures) {
     sig.regex.lastIndex = 0;
     const m = sig.regex.exec(text);
     if (!m) continue;
@@ -144,10 +144,13 @@ export interface DetectOptions {
   alsoScan?: string;
   /** Decode embedded Base64 blobs and scan the decoded payload too. */
   decodeBase64?: boolean;
+  /** Custom signatures appended to the built-in database for this scan. */
+  extraSignatures?: readonly Signature[];
 }
 
 export function detect(text: string, opts: DetectOptions = {}): DetectResult {
-  const { threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan, decodeBase64 = true } = opts;
+  const { threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan, decodeBase64 = true, extraSignatures } = opts;
+  const sigs = extraSignatures && extraSignatures.length ? [...SIGNATURES, ...extraSignatures] : SIGNATURES;
   const findings: Finding[] = [...extraFindings];
   const seen = new Set(findings.map((f) => f.patternId).filter(Boolean));
 
@@ -159,10 +162,10 @@ export function detect(text: string, opts: DetectOptions = {}): DetectResult {
     }
   };
 
-  merge(matchSignatures(text));
-  if (alsoScan !== undefined && alsoScan !== text) merge(matchSignatures(alsoScan));
+  merge(matchSignatures(text, sigs));
+  if (alsoScan !== undefined && alsoScan !== text) merge(matchSignatures(alsoScan, sigs));
   if (decodeBase64) {
-    for (const payload of decodeBase64Payloads(text)) merge(matchSignatures(payload), "(decoded from Base64)");
+    for (const payload of decodeBase64Payloads(text)) merge(matchSignatures(payload, sigs), "(decoded from Base64)");
   }
   if (useHeuristics) findings.push(...heuristicFindings(text));
 

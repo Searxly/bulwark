@@ -7,7 +7,7 @@ Bulwark is a security tool, so we take its own correctness seriously.
 If you find a way to bypass Bulwark's defenses, or a bug in Bulwark that could
 weaken an application that relies on it, please report it **privately** first:
 
-- Open a [GitHub Security Advisory](https://github.com/Myrhex-x/bulwark/security/advisories/new)
+- Open a [GitHub Security Advisory](https://github.com/Searxly/bulwark/security/advisories/new)
   (preferred), or
 - Email the maintainer listed on the GitHub profile.
 

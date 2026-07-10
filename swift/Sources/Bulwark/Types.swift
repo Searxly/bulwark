@@ -19,7 +19,7 @@ public enum Severity: String, Comparable, Sendable, CaseIterable {
 }
 
 public enum Stage: String, Sendable {
-    case sanitize, detect, validate
+    case sanitize, detect, validate, tool
 }
 
 public struct Finding: Sendable {

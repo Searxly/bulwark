@@ -6,10 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.4.0] — 
 
-Evasion-resistance and coverage release. All three languages at parity (71 Python
-/ 69 TypeScript / 69 Swift tests).
+Agents and evasion-resistance release. Detection at parity across the three
+languages (71 Python / 69 TypeScript / 69 Swift detection tests); ToolGuard
+adds 18 Swift tests on top.
 
 ### Added
+- **ToolGuard (Swift)** — tool-calling safeguards for agents: Bulwark's new
+  second purpose beyond summarization. Guards the three choke points of an
+  agent loop: tool **arguments** (`checkCall`: exfiltration-URL heuristics —
+  length + opaque-token, embedded credentials, disallowed schemes, syntactic
+  private/local-host blocking, invisible-Unicode smuggling, injection-style
+  text), tool **outputs** (`registerOutput`: detector scan + nonce-delimited
+  untrusted-data wrapping), and the **loop** itself (sliding-window rate limit,
+  identical-call loop detection, and session TAINT: once injected content is
+  seen in an output, calls above `readOnly` are blocked/flagged until
+  `clearTaint()`). New `ToolRisk` levels (`readOnly`/`navigate`/`write`/
+  `destructive`), `ToolGuardConfig`, and a `tool` finding stage. 18 tests,
+  including the full contained escalation chain. Python and TypeScript ports
+  planned.
 - **Leetspeak folding** (`fold_leet`) — letters disguised as look-alike digits or
   symbols (`1gn0r3 4ll pr3v10us`, `@dmin`, `$ystem`) are mapped back to ASCII on
   the detection copy before signatures run. Composed with confusable folding via

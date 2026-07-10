@@ -49,6 +49,12 @@ let signatures: [Signature] = [
     sig("io.from_now_on", "instruction_override", .medium, 0.45,
         #"\bfrom\s+now\s+on\b.{0,40}?\byou\s+(?:will|must|should|shall)\b"#,
         "Attempts to install a new standing directive"),
+    sig("io.cancel_task", "instruction_override", .medium, 0.50,
+        #"\b(?:cancel|abort|skip|stop)\s+(?:the\s+|your\s+)?(?:summary|summari[sz]ation|summari[sz]ing|task|above\s+task)\b"#,
+        "Tells the model to cancel/abort its real task"),
+    sig("io.reset_context", "instruction_override", .medium, 0.50,
+        #"\b(?:reset|clear|wipe|erase|flush)\b.{0,20}?\b(?:context|memory|conversation|chat\s+history|history|everything\s+(?:above|so\s+far))\b"#,
+        "Asks the model to reset/clear its context or memory"),
 
     // --- Role / structure injection ---
     sig("role.chatml", "role_injection", .critical, 0.82,
@@ -100,6 +106,9 @@ let signatures: [Signature] = [
     sig("exfil.include_link", "exfiltration", .medium, 0.50,
         #"\b(?:include|embed|add|insert)\b.{0,30}?\b(?:tracking\s+pixel|this\s+(?:link|image|url))\b"#,
         "Asks to embed a link/pixel in the output"),
+    sig("exfil.markdown_link_data", "exfiltration", .high, 0.70,
+        #"\[[^\]]*\]\(\s*https?://[^)]*[?&][\w.\-%]+=[A-Za-z0-9+/=_\-]{16,}"#,
+        "Markdown link carrying a long, data-bearing query string (exfiltration channel)"),
 
     // --- Jailbreak / persona ---
     sig("jb.dan", "jailbreak", .high, 0.78,
@@ -117,6 +126,12 @@ let signatures: [Signature] = [
     sig("jb.act_as", "jailbreak", .low, 0.28,
         #"\bact\s+as\s+(?:if\s+you\s+(?:are|were)\s+|a\s+|an\s+|the\s+)"#,
         "'Act as' framing (often benign — low weight)"),
+    sig("jb.unlock_mode", "jailbreak", .high, 0.62,
+        #"\b(?:unlock|enable|activate|enter|switch\s+to)\b.{0,20}?\b(?:developer|god|admin|root|debug|unrestricted|dan)\s+mode\b"#,
+        "Tries to enable an unrestricted/developer mode"),
+    sig("jb.hypothetical", "jailbreak", .medium, 0.50,
+        #"\b(?:hypothetical(?:ly)?|fictional|in\s+a\s+(?:fictional|hypothetical|imaginary)\s+(?:world|scenario|story))\b.{0,40}?\b(?:no\s+(?:rules|restrictions|guidelines|limits)|anything\s+is\s+(?:allowed|permitted|possible)|you\s+can\s+do\s+anything|without\s+(?:any\s+)?(?:rules|restrictions))\b"#,
+        "Hypothetical/fictional framing used to lift restrictions"),
 
     // --- Tool / action injection ---
     sig("tool.call_function", "tool_injection", .high, 0.62,
@@ -128,6 +143,9 @@ let signatures: [Signature] = [
     sig("tool.destructive", "tool_injection", .high, 0.66,
         #"\b(?:delete|drop|wipe|erase|rm\s+-rf|truncate|format)\b.{0,25}?\b(?:file|files|database|table|record|directory|everything|all\s+data)\b"#,
         "Destructive action request"),
+    sig("tool.shell_exec", "tool_injection", .high, 0.60,
+        #"\b(?:execute|run|eval(?:uate)?)\b.{0,20}?\b(?:shell|bash|sh|zsh|code|script|python|os\.system|subprocess|powershell|cmd|terminal)\b"#,
+        "Asks the model to execute shell/code"),
 
     // --- Boundary breakout ---
     sig("bnd.end_of_document", "boundary_breakout", .medium, 0.58,
@@ -216,4 +234,22 @@ let signatures: [Signature] = [
     sig("ml.reveal_zh", "prompt_leak", .high, 0.78,
         #"(?:显示|输出|告诉我|泄露|重复|打印)[^。\n]{0,8}(?:系统提示|系统指令|你的指令|提示词|初始指令)"#,
         "Reveal-system-prompt (Chinese)"),
+    sig("ml.ignore_ko", "instruction_override", .high, 0.80,
+        #"(?:이전|모든|위의|앞의)[^。\n]{0,12}(?:지시|명령|지침|규칙)[^。\n]{0,8}무시"#,
+        "Ignore-instructions (Korean)"),
+    sig("ml.ignore_ar", "instruction_override", .high, 0.80,
+        #"تجاهل[\s\S]{0,30}?(?:التعليمات|الإرشادات|الأوامر|التعليمة)[\s\S]{0,20}?(?:السابقة|أعلاه|السابقه)"#,
+        "Ignore-previous-instructions (Arabic)"),
+    sig("ml.ignore_hi", "instruction_override", .high, 0.80,
+        #"(?:पिछले|सभी|उपरोक्त|पिछली)[\s\S]{0,20}?(?:निर्देश|निर्देशों|आदेश)[\s\S]{0,20}?(?:अनदेखा|नज़रअंदाज़|अनदेखी|नजरअंदाज)"#,
+        "Ignore-previous-instructions (Hindi)"),
+    sig("ml.ignore_tr", "instruction_override", .high, 0.80,
+        #"önceki[\s\S]{0,30}?talimat[\s\S]{0,20}?(?:yok\s*say|görmezden|dikkate\s+alma|gözardı)"#,
+        "Ignore-previous-instructions (Turkish)"),
+    sig("ml.ignore_nl", "instruction_override", .high, 0.80,
+        #"negeer[\s\S]{0,30}?(?:voorgaande|vorige|bovenstaande|eerdere)[\s\S]{0,20}?(?:instructies|aanwijzingen|opdrachten)"#,
+        "Ignore-previous-instructions (Dutch)"),
+    sig("ml.ignore_pl", "instruction_override", .high, 0.80,
+        #"(?:zignoruj|ignoruj|pomiń)[\s\S]{0,30}?(?:poprzednie|powyższe|wcześniejsze)[\s\S]{0,20}?(?:instrukcje|polecenia|wytyczne)"#,
+        "Ignore-previous-instructions (Polish)"),
 ]

@@ -13,6 +13,9 @@ const MD_LINK_RE = /\[[^\]]*\]\(\s*https?:\/\/[^)]*\)/g;
 const HTML_IMG_RE = /<img\b[^>]*>/gi;
 const AUTOLINK_RE = /<\s*https?:\/\/[^>]*>/gi;
 const DATA_URL_RE = /https?:\/\/[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_-]{16,}[^\s)>\]]*/g;
+// Reference-style link/image definition: "[id]: https://…". A model tricked into
+// emitting one exfiltrates via a link the chat UI later resolves.
+const REF_LINK_RE = /^[ \t]*\[[^\]]+\]:\s*<?https?:\/\/[^\s>]+>?/gim;
 const COMPLIANCE_RE =
   /^\s*(?:sure\b|certainly\b|of\s+course\b|okay\b|ok\b|here\s+(?:is|are|'s)\b|as\s+(?:dan|requested|instructed|you\s+(?:asked|wish|requested))\b|i\s+(?:will|'ll|have|am\s+now)\b|ignoring\s+(?:previous|the)\b|hacked\b|pwned\b|i\s+am\s+dan\b)/i;
 const CANARY_PREFIX_RE = /BULWARK-CANARY-\w*/g;
@@ -88,6 +91,15 @@ export function validateOutput(
     findings.push({ stage: "validate", category: "data_url_exfiltration", severity: "high", weight: 0.82, message: `Output contains ${dataUrls.length} URL(s) with a data-bearing query string`, excerpt: dataUrls[0]!.slice(0, 80) });
     if (redactLinks) {
       cleaned = cleaned.replace(DATA_URL_RE, "[link removed]");
+      redacted = true;
+    }
+  }
+
+  const refLinks = cleaned.match(REF_LINK_RE);
+  if (refLinks) {
+    findings.push({ stage: "validate", category: "reference_link", severity: "medium", weight: 0.5, message: `Output contains ${refLinks.length} reference-style link definition(s)`, excerpt: refLinks[0]!.slice(0, 80) });
+    if (redactLinks) {
+      cleaned = cleaned.replace(REF_LINK_RE, "[link removed]");
       redacted = true;
     }
   }

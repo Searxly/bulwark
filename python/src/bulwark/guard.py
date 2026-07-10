@@ -122,11 +122,11 @@ class Bulwark:
         return result
 
     def _folded_text(self, san: SanitizeResult) -> "str | None":
-        """Confusable-folded copy for the detector's second pass (homoglyph
-        disguises). Detection still runs primarily on the un-folded text so
-        legitimate non-Latin scripts (and multilingual signatures) keep working.
+        """Folded copy for the detector's second pass — leetspeak and cross-script
+        homoglyph disguises. Detection still runs primarily on the un-folded text
+        so legitimate non-Latin scripts (and multilingual signatures) keep working.
         Never sent to the model."""
-        return _sanitize.fold_confusables(san.text) if self.config.fold_confusables else None
+        return _sanitize.fold_detection(san.text) if self.config.fold_confusables else None
 
     def scan(self, content: str) -> DetectResult:
         """Sanitize + detect only — no model call. Use to gate content yourself."""

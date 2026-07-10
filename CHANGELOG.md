@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 
+
+Evasion-resistance and coverage release. All three languages at parity (71 Python
+/ 69 TypeScript / 69 Swift tests).
+
+### Added
+- **Leetspeak folding** (`fold_leet`) — letters disguised as look-alike digits or
+  symbols (`1gn0r3 4ll pr3v10us`, `@dmin`, `$ystem`) are mapped back to ASCII on
+  the detection copy before signatures run. Composed with confusable folding via
+  `fold_detection`; model-facing text and legitimate numerals are untouched.
+- **Six more languages** — injection signatures for Korean, Arabic, Hindi,
+  Turkish, Dutch, and Polish, bringing detection to **15 languages** (70
+  signatures total). The multilingual corpus enforces recall and zero false
+  positives on benign foreign text for each.
+- **New English signatures** — enable developer/god mode, hypothetical/fictional
+  jailbreak framing, shell/code execution requests, context-reset/clear, cancel
+  the real task, and markdown links carrying a data-bearing query string.
+- **Reference-style link exfiltration** — output validation now catches and
+  redacts reference-style markdown definitions (`[id]: https://…`), not just
+  inline `[text](url)` links.
+
+### Changed
+- Dev tooling: upgraded the TypeScript test runner to `vitest@4` (clears all
+  transitive `esbuild`/`vite` advisories) and moved the CI matrix to Node
+  20/22/24 (Node 18 is end-of-life). The published package remains
+  zero-dependency; the library's `engines.node` is unchanged at `>=18`.
+
 ## [0.3.0] — 
 
 Second security review. All three languages at parity (59 Python / 58 TypeScript

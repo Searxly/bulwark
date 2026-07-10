@@ -199,4 +199,4 @@ public func scan(_ text: String, threshold: Double = 0.5) -> DetectResult {
     return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldDetection(s.text)))
 }
 
-public let bulwarkVersion = "0.4.0"
+public let bulwarkVersion = "0.5.0"

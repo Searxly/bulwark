@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 
+
+Privacy on the output side: PII redaction for tool results.
+
+### Added
+- **Rampart (Swift)** — a zero-dependency, deterministic PII redactor. `Rampart.redact`
+  replaces structured personal data — emails, phones, Luhn-valid credit cards,
+  structurally-valid US SSNs, validated IPv4/IPv6, IBANs — with typed, reversible
+  placeholders (`[EMAIL_1]`), so a model (especially a remote one) reasons over
+  structure instead of secrets. Stable per-value tokens, a PII-safe `summary`
+  (labels + counts only), a `keep` set for detect-but-retain classes, and
+  `rehydrate` for the redact-outbound / restore-inbound round trip. Names and
+  addresses need a NER model and stay in the host app; this is the portable floor.
+  Approach inspired by National Design Studio's Rampart (CC BY 4.0); original MIT
+  reimplementation.
+- **ToolGuard output redaction** — `ToolGuardConfig.redactOutputPII` (with
+  `keepPIIEntities`) runs Rampart on a tool's output before it's scanned and wrapped,
+  so personal data never survives into the model context. `ToolOutputAssessment`
+  gains `piiRedactions` + `piiSummary`. 14 tests.
+
 ## [0.4.0] — 
 
 Agents and evasion-resistance release. Detection at parity across the three

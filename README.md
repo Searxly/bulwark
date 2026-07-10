@@ -288,6 +288,52 @@ SSRF guard in your fetch layer too. Python and TypeScript ports are planned.
 
 ---
 
+## Rampart — redact PII before the model sees it (Swift)
+
+The layers above stop a hostile page from steering your model. **Rampart** handles
+the mirror-image risk: your model — or the provider behind it — seeing personal
+data it never needed. When a tool returns a page, an email, or a search result,
+that text can carry a real person's email, card, national ID, or IP. Rampart
+replaces each one with a **typed, reversible placeholder** (`[EMAIL_1]`) so the
+model reasons over structure, not secrets — and if the model is a remote one, the
+raw value never leaves the machine.
+
+```swift
+import Bulwark
+
+let r = Rampart.redact("Reach the author at editor@news.example or 555-123-4567.")
+print(r.text)     // "Reach the author at [EMAIL_1] or [PHONE_1]."
+print(r.summary)  // "EMAIL×1, PHONE×1"  (labels + counts only — safe to log)
+
+// You control the reply channel? Redact outbound, rehydrate inbound:
+let restored = Rampart.rehydrate(modelReply, map: r.map)
+```
+
+It's the **deterministic layer**: regex + checksum validators, zero dependencies,
+no model to load. It catches structured identifiers exactly — Luhn-valid cards,
+structurally-valid US SSNs, validated IPv4/IPv6, emails, phones, IBANs. Names and
+street addresses need a NER model and belong in the host app (Searxly ships a
+14.7 MB ONNX one); this layer is the portable, always-available floor.
+
+Wire it straight into ToolGuard so every tool result is scrubbed on its way to the
+model:
+
+```swift
+let guard = ToolGuard(config: ToolGuardConfig(
+    redactOutputPII: true,
+    keepPIIEntities: [.ipAddress]   // detect-but-retain classes you still need
+))
+let out = guard.registerOutput(tool: "read_page", output: pageText)
+sendToModel(out.wrapped)           // PII already replaced, then wrapped as data
+print(out.piiRedactions)           // how many spans were hidden
+```
+
+> Approach inspired by National Design Studio's [Rampart](https://github.com/nationaldesignstudio/rampart)
+> (CC BY 4.0); Bulwark's is an original, dependency-free reimplementation of the
+> deterministic detectors.
+
+---
+
 ## What it catches (and what it can't)
 
 **Catches well:** hidden-text smuggling (Unicode tags, zero-width, bidi, nested

@@ -19,6 +19,7 @@ function resultFor(text: string) {
     threshold: THRESHOLD,
     extraFindings: san.findings,
     alsoScan: foldDetection(san.text),
+    alsoDecode: text,
   });
   const patterns = [...new Set(det.findings.map((f) => f.patternId).filter(Boolean))].sort();
   const categories = [...new Set(det.findings.map((f) => f.category))].sort();

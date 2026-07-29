@@ -27,6 +27,7 @@ def result_for(text: str, threshold: float) -> dict:
         threshold=threshold,
         extra_findings=san.findings,
         also_scan=fold_detection(san.text),
+        also_decode=text,
     )
     return {
         "injected": det.injected,

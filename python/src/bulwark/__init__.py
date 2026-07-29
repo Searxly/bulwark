@@ -56,7 +56,7 @@ from .types import (
 )
 from .validate import validate_output
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "Bulwark",

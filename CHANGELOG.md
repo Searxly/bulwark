@@ -4,6 +4,69 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] —
+
+Parity. 1.0.0 shipped its new detection layers in Python only and said so; this
+release brings TypeScript and Swift up, and replaces the "identical verdicts"
+claim with a measurement that CI defends.
+
+**All three implementations now agree on all 888 corpus cases.**
+`tools/conformance.py` runs the identical corpus bytes through Python,
+TypeScript and Swift and diffs every verdict, score, risk bucket and fired
+signature id. At 1.0.0 it reported **529 divergences**; it now reports none.
+
+### The root cause was three copies of one fact
+
+Most of those 529 were a signature that existed in one language and not another.
+Keeping three hand-written copies of a 131-entry signature database in step is
+not a discipline problem, it is a design problem.
+
+The database now exists **once**, in `python/src/bulwark/patterns.py`, and
+`tools/gen_patterns.py` generates the TypeScript and Swift versions from it.
+`--check` runs in CI, so they cannot go stale. That single change took the
+divergence count from 529 to 67.
+
+Generation is not transliteration: JavaScript's `\w` and `\b` are ASCII-only
+where Python's are Unicode-aware, and the `u` flag rejects redundant escapes
+that Python tolerates. Both are handled in the generator, with per-signature
+override tables for anything the generic rules cannot express.
+
+### Ported to TypeScript and Swift
+
+`decode`, `context`, `grounding`, `urlcheck`, `segment`, `session`, `tripwire`,
+`rampart` and `toolguard`, plus the hardened output validation — the full 1.0.0
+set. Each was verified against the Python reference case by case rather than
+eyeballed.
+
+Both detectors now run the same four views of the text as Python (as written,
+homoglyph-folded, whitespace-flattened, diacritic-stripped), and both
+orchestrators gained `decodeEncoded`, `useContext`, `blockOnExfiltration`,
+`checkGrounding`, `checkLexicalGrounding` and `tripwire`.
+
+Swift's `Finding` gained a `span`, which it had been missing — quoting-context
+discounting cannot work without knowing where a match sits.
+
+### Fixed
+
+- **TypeScript and Swift were deleting `<|im_start|>` before detection ran.**
+  Both HTML scanners discarded anything between angle brackets that was not a
+  valid tag name — which is exactly what a chat-template token is. Text that is
+  not a tag is now emitted as text, which is what an HTML parser does.
+- **ICU's DOTALL dot treats a CRLF pair as one unit**, so a lazy `.*?` cannot
+  stop between the CR and the LF. Swift's code-fence spans ran two characters
+  long on every CRLF document. Replaced with `[\s\S]` and no DOTALL, verified
+  against the reference.
+- Both sanitizers picked up the 1.0.0 invisible-codepoint set (Hangul fillers,
+  interlinear annotation controls, the combining grapheme joiner, line and
+  paragraph separators), the emoji-variation-selector severity fix, and the
+  hidden-CSS pattern that no longer deletes visible text at `opacity:0.95`.
+- Swift's `isPrivateHost` and `isMetadataHost` moved into `URLCheck.swift`, so
+  there is one host canonicalizer rather than two that can drift.
+
+### Known gaps
+
+- npm and PyPI publishes are still not done; the git tag is the release.
+
 ## [1.0.0] —
 
 The measurement release. Bulwark now grades itself against a labeled corpus,

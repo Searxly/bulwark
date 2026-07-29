@@ -7,6 +7,15 @@ import Foundation
 
 private let zeroWidth: Set<UInt32> = [
     0x200b, 0x200c, 0x200d, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xfeff, 0x180e, 0x00ad,
+    // Hangul fillers render as nothing in every browser and split a trigger word
+    // as effectively as a zero-width space.
+    0x115f, 0x1160, 0x3164, 0xffa0,
+    // Interlinear annotation controls and the combining grapheme joiner.
+    0xfff9, 0xfffa, 0xfffb, 0x034f,
+    // Line and paragraph separators: invisible line breaks.
+    0x2028, 0x2029,
+    // Mongolian vowel separator and Khmer invisible spacers.
+    0x17b4, 0x17b5,
 ]
 private let bidiControls: Set<UInt32> = [
     0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200e, 0x200f, 0x061c,
@@ -107,7 +116,10 @@ public func foldDetection(_ text: String) -> String {
 private let wsRegex = CompiledRegex(#"[^\S\n]+"#, options: [])
 private let blanklinesRegex = CompiledRegex(#"\n{3,}"#, options: [])
 private let htmlishRegex = CompiledRegex(#"<(?:/?[a-zA-Z][\w:-]*\b|!--)"#, options: [.caseInsensitive])
-private let hiddenStyleRegex = CompiledRegex(#"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|font-size\s*:\s*0(?:px|em|rem|%)?\b"#)
+// Zero only. `opacity:0` hides text; `opacity:0.95` does not, and the previous
+// pattern matched both, silently deleting visible article text.
+private let hiddenStyleRegex = CompiledRegex(
+    #"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$|!)|font-size\s*:\s*0(?:\.0+)?(?:px|em|rem|pt|%)?\s*(?:;|$|!)|(?:width|height)\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?\s*(?:;|$|!)|text-indent\s*:\s*-\d{4,}|clip-path\s*:\s*inset\(\s*(?:100%|50%\s+50%)|position\s*:\s*absolute[^;]*;\s*(?:left|top)\s*:\s*-\d{4,}"#)
 private let hiddenAttrRegex = CompiledRegex(#"(?:^|\s)hidden(?=[\s=>]|$)"#)
 private let ariaHiddenRegex = CompiledRegex(#"aria-hidden\s*=\s*["']?true"#)
 
@@ -137,7 +149,12 @@ public func stripInvisible(_ text: String, keepEmojiVariation: Bool = false) -> 
         else if bidiControls.contains(cp) { bump("bidi_controls") }
         else if isVariationSelector(cp) {
             if keepEmojiVariation && cp >= 0xFE00 && cp <= 0xFE0F { out.unicodeScalars.append(s) }
-            else { bump("variation_selectors") }
+            // Only the supplementary selectors are a smuggling channel.
+            // U+FE00-FE0F are ordinary emoji presentation selectors, and
+            // reporting one at HIGH severity made every document containing an
+            // emoji score as an attack.
+            else { bump(cp >= 0xFE00 && cp <= 0xFE0F ? "variation_selectors"
+                                                     : "variation_selectors_supplementary") }
         }
         else if zeroWidth.contains(cp) { bump("zero_width") }
         else if s == "\t" || s == "\n" || s == "\r" { out.unicodeScalars.append(s) }
@@ -154,9 +171,13 @@ public func stripInvisible(_ text: String, keepEmojiVariation: Bool = false) -> 
         findings.append(Finding(stage: .sanitize, category: "bidi_control", severity: .high, weight: 0.62,
                                 message: "Removed \(n) bidirectional control character(s) (Trojan Source)"))
     }
-    if let n = counts["variation_selectors"] {
+    if let n = counts["variation_selectors_supplementary"] {
         findings.append(Finding(stage: .sanitize, category: "variation_smuggling", severity: .high, weight: 0.66,
-                                message: "Removed \(n) variation selector(s) (possible data smuggling)"))
+                                message: "Removed \(n) supplementary variation selector(s) (a data-smuggling channel)"))
+    }
+    if let n = counts["variation_selectors"] {
+        findings.append(Finding(stage: .sanitize, category: "variation_selector", severity: .info, weight: 0,
+                                message: "Removed \(n) emoji variation selector(s)"))
     }
     if let n = counts["zero_width"] {
         findings.append(Finding(stage: .sanitize, category: "zero_width", severity: .low, weight: 0.24,
@@ -268,7 +289,16 @@ public func stripHtml(_ text: String) -> (text: String, counts: [String: Int], f
         var selfClose = false
         if body.hasSuffix("/") { selfClose = true; body.removeLast() }
 
-        guard let name = tagName(body) else { continue }
+        guard let name = tagName(body) else {
+            // Not a tag name, so this is not a tag — it is text that happens to
+            // sit between angle brackets. Emitting it is what an HTML parser
+            // does, and dropping it silently deletes exactly the payloads that
+            // matter: `<|im_start|>` and the other chat-template tokens are not
+            // valid tags, and discarding them removed the evidence before the
+            // detector ran.
+            emit(String(chars[lt...gt]))
+            continue
+        }
         let tag = name.lowercased()
         let attrStr = String(body.dropFirst(name.count))
 
@@ -398,4 +428,79 @@ private func replaceEntities(_ text: String, _ regex: CompiledRegex, radix: Int)
     }
     result += ns.substring(with: NSRange(location: last, length: ns.length - last))
     return result
+}
+
+// MARK: - Detection views
+
+private let softHyphens: Set<Unicode.Scalar> = ["-", "\u{00ad}", "\u{2010}", "\u{2011}"]
+
+/// Collapse whitespace and rejoin hyphenated line breaks, keeping an offset map.
+///
+/// Signatures join their trigger words with bounded spans like `.{0,40}?`, and
+/// ICU's dot does not cross a line break any more than Python's or JavaScript's.
+/// So the canonical payload stops matching the moment it is hard-wrapped, which
+/// ordinary 72-column text does by accident and an attacker does on purpose.
+/// PDF and typeset sources add the second half: `dis-\nregard` splits the word.
+///
+/// `.dotMatchesLineSeparators` would be the wrong fix — it lets a bounded span
+/// reach across paragraphs and pair up words that merely sit near each other,
+/// trading a false negative for a false positive. This builds a flattened *view*
+/// instead, so proximity limits still mean what they say; they just stop
+/// counting line breaks as content.
+///
+/// Offsets are UTF-16, matching what `NSRegularExpression` reports.
+public func flattenForDetection(_ text: String) -> (text: String, index: [Int]) {
+    var out = String.UnicodeScalarView()
+    var index: [Int] = []
+    let scalars = Array(text.unicodeScalars)
+
+    // UTF-16 offset of each scalar.
+    var offsets: [Int] = []
+    offsets.reserveCapacity(scalars.count)
+    var at = 0
+    for scalar in scalars {
+        offsets.append(at)
+        at += UTF16.width(scalar)
+    }
+
+    func isWordy(_ s: Unicode.Scalar) -> Bool {
+        s.properties.isAlphabetic || ("0"..."9").contains(s)
+    }
+
+    var i = 0
+    while i < scalars.count {
+        let scalar = scalars[i]
+        if softHyphens.contains(scalar), let previous = out.last, isWordy(previous) {
+            var j = i + 1
+            while j < scalars.count, scalars[j] == " " || scalars[j] == "\t" { j += 1 }
+            if j < scalars.count, scalars[j] == "\r" || scalars[j] == "\n" {
+                while j < scalars.count,
+                      scalars[j] == "\r" || scalars[j] == "\n" || scalars[j] == " " || scalars[j] == "\t" { j += 1 }
+                if j < scalars.count, isWordy(scalars[j]) {
+                    i = j          // drop the hyphen and the break; the word closes up
+                    continue
+                }
+            }
+        }
+        if scalar.properties.isWhitespace {
+            if let previous = out.last, previous != " " {
+                out.append(" ")
+                index.append(offsets[i])
+            }
+            i += 1
+            continue
+        }
+        out.append(scalar)
+        index.append(offsets[i])
+        i += 1
+    }
+    return (String(out), index)
+}
+
+/// Translate a span found in a flattened view back to the original text.
+public func mapSpan(_ span: (Int, Int), index: [Int], originalLength: Int) -> (Int, Int) {
+    guard !index.isEmpty else { return span }
+    let start = (span.0 >= 0 && span.0 < index.count) ? index[span.0] : originalLength
+    let last = Swift.min(Swift.max(span.1 - 1, 0), index.count - 1)
+    return (start, Swift.min(index[last] + 1, originalLength))
 }

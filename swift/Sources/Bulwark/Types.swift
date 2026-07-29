@@ -29,6 +29,12 @@ public struct Finding: Sendable {
     public let message: String
     public let weight: Double
     public let excerpt: String?
+    /// Where the match sits in the scanned text, as a UTF-16 `(start, end)`
+    /// range. Present for signature matches; nil for findings that describe the
+    /// document as a whole, such as sanitization results and density
+    /// heuristics. Quoting-context discounting needs it to know whether a
+    /// finding sits inside a code fence or a quotation.
+    public let span: (Int, Int)?
     public let patternId: String?
 
     public init(
@@ -38,6 +44,7 @@ public struct Finding: Sendable {
         weight: Double,
         message: String,
         excerpt: String? = nil,
+        span: (Int, Int)? = nil,
         patternId: String? = nil
     ) {
         self.stage = stage
@@ -46,6 +53,7 @@ public struct Finding: Sendable {
         self.message = message
         self.weight = weight
         self.excerpt = excerpt
+        self.span = span
         self.patternId = patternId
     }
 }

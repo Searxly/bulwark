@@ -1,33 +1,24 @@
 # 🛡️ Bulwark (Swift)
 
-> ### ⚠️ 1.0.0 status for this language
+> ### Parity with the reference implementation
 >
-> Swift received all of the 1.0.0 **security fixes** — see below — but not the
-> new **detection layers**. This package still has the 0.4.0 detection
-> behaviour: the original 70 signatures, no recursive decoding, no output
-> grounding, no quoting-context discounting, and not the fix for a single line
-> break defeating the instruction-override signatures.
+> Python is Bulwark's reference implementation, and this package is verified
+> against it rather than assumed to match. `python3 tools/conformance.py` runs
+> the identical corpus bytes through all three implementations and diffs every
+> verdict, score, risk bucket and fired signature id across 888 cases. They
+> agree on all of them, and CI keeps it that way.
 >
-> That gap is measured, not estimated. `python3 tools/conformance.py` runs the
-> identical corpus bytes through all three implementations and diffs every
-> verdict; it currently reports **529 divergences across 888 cases**.
+> The signature database is generated from the Python one by
+> `tools/gen_patterns.py`, so `Sources/Bulwark/Patterns.swift` is a generated
+> file — edit the Python source and regenerate.
 >
-> **Breaking change in this release**: Rampart placeholders now carry a
-> per-redaction nonce — `[EMAIL_1]` became `[EMAIL_1_a7f3]` — and are numbered
-> in reading order rather than backwards. If you assert on placeholder strings,
-> match the `[LABEL_N_` prefix rather than the whole token. The change closes a
-> real exfiltration path: `rehydrate` was not injective, so a placeholder an
-> attacker planted in a source page and got the model to echo would have been
-> replaced with a **real** value in text the attacker could read.
->
-> Also fixed: `ToolGuard.isPrivateHost` missed every non-canonical loopback
-> spelling (`0177.0.0.1`, `0x7f.0.0.1`, `2130706433`, `127.1`, `localhost.`),
-> and `foldConfusables`/`foldLeet` iterated grapheme clusters so one combining
-> mark defeated the whole fold. New `ToolGuardConfig.blockMetadataHosts`
-> (default `true`) is separate from `blockPrivateHosts`, so a host that
-> legitimately opens localhost still refuses cloud metadata endpoints.
-
-
+> **Breaking change in 1.0.0**: Rampart placeholders now carry a per-redaction
+> nonce — `[EMAIL_1]` became `[EMAIL_1_a7f3]` — and are numbered in reading
+> order rather than backwards. If you assert on placeholder strings, match the
+> `[LABEL_N_` prefix rather than the whole token. The change closes a real
+> exfiltration path: `rehydrate` was not injective, so a placeholder an attacker
+> planted in a source page and got the model to echo would have been replaced
+> with a **real** value in text the attacker could read.
 
 **An open-source safeguard against prompt injection in AI summarization.**
 
@@ -39,14 +30,14 @@ inside it doesn't.
 
 Pure Swift + Foundation, no third-party dependencies. Works on macOS, iOS,
 tvOS, watchOS (and Linux). Full docs, threat model, and architecture:
-https://github.com/Myrhex-x/bulwark
+https://github.com/Searxly/bulwark
 
 ## Install (Swift Package Manager)
 
 In `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "1.0.0")
+.package(url: "https://github.com/Searxly/bulwark.git", from: "1.1.0")
 ```
 
 …and add `"Bulwark"` to your target's dependencies. In Xcode: *File ▸ Add

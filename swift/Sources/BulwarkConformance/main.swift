@@ -43,7 +43,8 @@ func resultLine(id: String, text: String) -> String {
     let det = detect(san.text, options: DetectOptions(
         threshold: threshold,
         extraFindings: san.findings,
-        alsoScan: foldDetection(san.text)
+        alsoScan: foldDetection(san.text),
+        alsoDecode: text
     ))
     let patterns = Array(Set(det.findings.compactMap { $0.patternId })).sorted()
     let categories = Array(Set(det.findings.map { $0.category })).sorted()

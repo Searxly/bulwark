@@ -13,6 +13,14 @@ public struct BulwarkConfig: Sendable {
     // detect
     public var detectionThreshold: Double
     public var useHeuristics: Bool
+    /// Recursively decode encoded payloads (Base64, hex, percent, entities,
+    /// ROT13, zero-width bits …) and re-scan each layer. Runs on the raw
+    /// content, before sanitization strips the invisible channels.
+    public var decodeEncoded: Bool
+    /// Discount findings that sit inside quoted or code-fenced passages of a
+    /// document that reads as writing *about* attacks. Precision, not
+    /// permission: weights drop, findings never disappear.
+    public var useContext: Bool
     public var blockBeforeLlm: Severity?  // nil = never hard-block pre-LLM
     // spotlight
     public var spotlightMethods: [String]
@@ -25,6 +33,20 @@ public struct BulwarkConfig: Sendable {
     public var redactOutputLinks: Bool
     public var redactOutputImages: Bool
     public var blockOnOutputLeak: Bool
+    /// Mark the summary unsafe when it carries a high-severity exfiltration
+    /// channel. Without this a reply containing a confirmed exfiltration URL
+    /// was still reported SAFE, which is the wrong headline to act on.
+    public var blockOnExfiltration: Bool
+    /// Check the reply against the source: hosts, URLs and addresses it
+    /// mentions must appear in the document it was asked to summarize.
+    public var checkGrounding: Bool
+    /// The vocabulary-overlap half of grounding. Turn it off when the summary
+    /// is requested in a different language than the source.
+    public var checkLexicalGrounding: Bool
+    /// Plant a positive control in the content and check whether the model
+    /// obeyed it. Proof of compliance rather than a symptom — but it *is* an
+    /// injection attempt, so a correctly-behaving model will note it. Opt-in.
+    public var tripwire: Bool
 
     public init(
         stripHtml: Bool? = nil,
@@ -34,6 +56,8 @@ public struct BulwarkConfig: Sendable {
         maxContentChars: Int = 200_000,
         detectionThreshold: Double = 0.5,
         useHeuristics: Bool = true,
+        decodeEncoded: Bool = true,
+        useContext: Bool = true,
         blockBeforeLlm: Severity? = nil,
         spotlightMethods: [String] = ["delimit"],
         marker: String = defaultMarker,
@@ -42,7 +66,11 @@ public struct BulwarkConfig: Sendable {
         extraInstruction: String? = nil,
         redactOutputLinks: Bool = true,
         redactOutputImages: Bool = true,
-        blockOnOutputLeak: Bool = true
+        blockOnOutputLeak: Bool = true,
+        blockOnExfiltration: Bool = true,
+        checkGrounding: Bool = true,
+        checkLexicalGrounding: Bool = true,
+        tripwire: Bool = false
     ) {
         self.stripHtml = stripHtml
         self.normalizeUnicode = normalizeUnicode
@@ -51,6 +79,8 @@ public struct BulwarkConfig: Sendable {
         self.maxContentChars = maxContentChars
         self.detectionThreshold = detectionThreshold
         self.useHeuristics = useHeuristics
+        self.decodeEncoded = decodeEncoded
+        self.useContext = useContext
         self.blockBeforeLlm = blockBeforeLlm
         self.spotlightMethods = spotlightMethods
         self.marker = marker
@@ -60,6 +90,10 @@ public struct BulwarkConfig: Sendable {
         self.redactOutputLinks = redactOutputLinks
         self.redactOutputImages = redactOutputImages
         self.blockOnOutputLeak = blockOnOutputLeak
+        self.blockOnExfiltration = blockOnExfiltration
+        self.checkGrounding = checkGrounding
+        self.checkLexicalGrounding = checkLexicalGrounding
+        self.tripwire = tripwire
     }
 
     /// Default posture: strong structural defence, never silently drops content.
@@ -72,7 +106,8 @@ public struct BulwarkConfig: Sendable {
 
     /// Base64-encodes content and blocks on HIGH risk. Maximum safety, some quality cost.
     public static func paranoid() -> BulwarkConfig {
-        BulwarkConfig(detectionThreshold: 0.3, blockBeforeLlm: .high, spotlightMethods: ["base64", "delimit"])
+        BulwarkConfig(detectionThreshold: 0.3, blockBeforeLlm: .high,
+                      spotlightMethods: ["base64", "delimit"], tripwire: true)
     }
 }
 
@@ -82,6 +117,18 @@ public struct PreparedRequest {
     public let sanitize: SanitizeResult
     public let detect: DetectResult
     public let spotlight: SpotlightResult
+    /// The planted positive control, when `BulwarkConfig.tripwire` is on.
+    public let tripwire: Tripwire?
+
+    public init(messages: [ChatMessage], context: PromptContext, sanitize: SanitizeResult,
+                detect: DetectResult, spotlight: SpotlightResult, tripwire: Tripwire? = nil) {
+        self.messages = messages
+        self.context = context
+        self.sanitize = sanitize
+        self.detect = detect
+        self.spotlight = spotlight
+        self.tripwire = tripwire
+    }
 }
 
 /// A model is any async closure mapping chat messages to a reply string.
@@ -120,27 +167,45 @@ public struct Bulwark {
         config.foldConfusables ? foldDetection(san.text) : nil
     }
 
+    /// The raw content, capped. Kept un-sanitized because the decode stage needs
+    /// the invisible channels that sanitization strips.
+    private func truncated(_ content: String) -> String {
+        String(content.prefix(config.maxContentChars))
+    }
+
+    private func runDetect(_ content: String, _ san: SanitizeResult) -> DetectResult {
+        detect(san.text, options: DetectOptions(
+            threshold: config.detectionThreshold,
+            extraFindings: san.findings,
+            useHeuristics: config.useHeuristics,
+            alsoScan: foldedText(san),
+            alsoDecode: config.decodeEncoded ? truncated(content) : nil,
+            useContext: config.useContext
+        ))
+    }
+
     /// Sanitize + detect only — no model call. Use to gate content yourself.
     public func scan(_ content: String) -> DetectResult {
-        let san = sanitize(content)
-        return detect(san.text, options: DetectOptions(
-            threshold: config.detectionThreshold, extraFindings: san.findings,
-            useHeuristics: config.useHeuristics, alsoScan: foldedText(san)
-        ))
+        runDetect(content, sanitize(content))
     }
 
     /// Sanitize, detect, spotlight and build messages — ready for any model.
     public func prepare(_ content: String) -> PreparedRequest {
         let san = sanitize(content)
-        let det = detect(san.text, options: DetectOptions(
-            threshold: config.detectionThreshold, extraFindings: san.findings,
-            useHeuristics: config.useHeuristics, alsoScan: foldedText(san)
-        ))
-        let spot = spotlight(san.text, options: SpotlightOptions(methods: config.spotlightMethods, marker: config.marker))
+        let det = runDetect(content, san)
+
+        // The tripwire is planted after detection on purpose: it is
+        // instruction-shaped, and scanning it would inflate the input's own risk
+        // score with Bulwark's own text.
+        let wire = config.tripwire ? makeTripwire() : nil
+        let body = wire.map { plantTripwire(san.text, wire: $0) } ?? san.text
+
+        let spot = spotlight(body, options: SpotlightOptions(methods: config.spotlightMethods, marker: config.marker))
         let (messages, context) = buildMessages(spot, options: BuildOptions(
             maxWords: config.maxWords, language: config.language, extraInstruction: config.extraInstruction
         ))
-        return PreparedRequest(messages: messages, context: context, sanitize: san, detect: det, spotlight: spot)
+        return PreparedRequest(messages: messages, context: context, sanitize: san,
+                               detect: det, spotlight: spot, tripwire: wire)
     }
 
     /// Validate a model reply produced from `prepare`.
@@ -196,7 +261,15 @@ public struct Bulwark {
 /// disguises are caught.
 public func scan(_ text: String, threshold: Double = 0.5) -> DetectResult {
     let s = sanitize(text)
-    return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldDetection(s.text)))
+    return detect(s.text, options: DetectOptions(
+        threshold: threshold,
+        extraFindings: s.findings,
+        alsoScan: foldDetection(s.text),
+        // The raw text, deliberately: channels such as zero-width bit strings
+        // are removed by sanitization precisely because they are invisible, so
+        // decoding the sanitized copy would find nothing.
+        alsoDecode: text
+    ))
 }
 
-public let bulwarkVersion = "1.0.0"
+public let bulwarkVersion = "1.1.0"

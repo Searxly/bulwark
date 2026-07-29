@@ -386,12 +386,12 @@ public final class ToolGuard: @unchecked Sendable {
             ))
         }
 
-        if config.blockMetadataHosts, let host = url.host?.lowercased(), Self.isMetadataHost(host) {
+        if config.blockMetadataHosts, let host = url.host?.lowercased(), isMetadataHost(host) {
             findings.append(Finding(
                 stage: .tool, category: "tool_url_metadata_endpoint", severity: .critical, weight: 1.0,
                 message: "URL targets a cloud instance-metadata endpoint (\(host))"
             ))
-        } else if config.blockPrivateHosts, let host = url.host?.lowercased(), Self.isPrivateHost(host) {
+        } else if config.blockPrivateHosts, let host = url.host?.lowercased(), isPrivateHost(host) {
             findings.append(Finding(
                 stage: .tool, category: "tool_url_private_host", severity: .high, weight: 0.8,
                 message: "URL targets a private or local host (\(host))"
@@ -419,121 +419,18 @@ public final class ToolGuard: @unchecked Sendable {
         return findings
     }
 
+    // Host canonicalization lives in URLCheck.swift — one canonicalizer for the
+    // whole library, so a guard here and a check there can never drift apart.
+    // These stay as named entry points because a host is not a string: all of
+    //
+    //     127.0.0.1    2130706433    0177.0.0.1    0x7f.0.0.1    127.1
+    //
+    // name the loopback address, and the check this replaced (`UInt8($0)` per
+    // component) recognised only the first — `UInt8("0177")` is nil, so the octal
+    // form produced a 3-element array, fell through every branch, and was reported
+    // public.
+
     /// Canonicalize any `inet_aton`-accepted IPv4 spelling to a 32-bit integer.
-    ///
-    /// A host is not a string. All of these name 127.0.0.1, and the previous
-    /// `compactMap { UInt8($0) }` check recognised only the first:
-    ///
-    ///     127.0.0.1    2130706433    0177.0.0.1    0x7f.0.0.1    127.1
-    ///
-    /// `UInt8("0177")` is nil, so the octal form produced a 3-element array,
-    /// fell through every branch, and was reported public. Each component may
-    /// independently be decimal, octal or hex, and the last one absorbs the
-    /// remaining bytes — that is the grammar the C library and browsers accept,
-    /// so it is the grammar a guard has to accept too.
-    static func canonicalIPv4(_ host: String) -> UInt32? {
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard (1...4).contains(parts.count) else { return nil }
+    static func canonicalIPv4(_ host: String) -> UInt32? { parseIPv4(host) }
 
-        var values: [UInt64] = []
-        for part in parts {
-            let text = part.lowercased()
-            guard !text.isEmpty else { return nil }
-            let value: UInt64?
-            if text.hasPrefix("0x") {
-                value = text.count > 2 ? UInt64(text.dropFirst(2), radix: 16) : nil
-            } else if text.hasPrefix("0") && text.count > 1 {
-                value = UInt64(text.dropFirst(), radix: 8)
-            } else {
-                value = UInt64(text, radix: 10)
-            }
-            guard let v = value else { return nil }
-            values.append(v)
-        }
-
-        // Every component but the last is one byte; the last absorbs the rest.
-        guard values.dropLast().allSatisfy({ $0 <= 0xFF }) else { return nil }
-        let limit = UInt64(1) << (8 * UInt64(5 - values.count))
-        guard let last = values.last, last < limit else { return nil }
-
-        var result = last
-        for (i, value) in values.dropLast().enumerated() {
-            result |= value << (8 * UInt64(3 - i))
-        }
-        return result <= 0xFFFF_FFFF ? UInt32(result) : nil
-    }
-
-    private static func isPrivateIPv4(_ value: UInt32) -> Bool {
-        let ranges: [(UInt32, UInt32)] = [
-            (0x0000_0000, 8),   // 0.0.0.0/8      this network
-            (0x0A00_0000, 8),   // 10/8           private
-            (0x7F00_0000, 8),   // 127/8          loopback
-            (0xA9FE_0000, 16),  // 169.254/16     link-local, incl. cloud metadata
-            (0xAC10_0000, 12),  // 172.16/12      private
-            (0xC0A8_0000, 16),  // 192.168/16     private
-            (0x6440_0000, 10),  // 100.64/10      CGNAT
-            (0xC000_0000, 24),  // 192.0.0/24     protocol assignments
-            (0xC000_0200, 24),  // 192.0.2/24     TEST-NET-1
-            (0xC612_0000, 15),  // 198.18/15      benchmarking
-            (0xC633_6400, 24),  // 198.51.100/24  TEST-NET-2
-            (0xCB00_7100, 24),  // 203.0.113/24   TEST-NET-3
-            (0xE000_0000, 4),   // 224/4          multicast
-            (0xF000_0000, 4),   // 240/4          reserved + broadcast
-        ]
-        for (base, bits) in ranges {
-            let size = UInt64(1) << (32 - UInt64(bits))
-            if UInt64(value) >= UInt64(base) && UInt64(value) < UInt64(base) + size { return true }
-        }
-        return false
-    }
-
-    /// Syntactic private/local host check across every IPv4 and IPv6 spelling.
-    /// No DNS is resolved — keep a resolver-level SSRF guard in the fetch layer.
-    static func isPrivateHost(_ host: String) -> Bool {
-        var h = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
-        // A fully-qualified name may carry a trailing root dot: resolvers treat
-        // "localhost." and "localhost" as the same name, so this must too.
-        h = h.lowercased()
-        while h.hasSuffix(".") { h.removeLast() }
-        guard !h.isEmpty else { return false }
-
-        if h == "localhost" || h == "localhost.localdomain" || h.hasSuffix(".localhost") { return true }
-        if h.hasSuffix(".local") || h.hasSuffix(".internal") || h.hasSuffix(".home.arpa") { return true }
-
-        if let value = canonicalIPv4(h) { return isPrivateIPv4(value) }
-
-        if h.contains(":") {
-            let bare = h.split(separator: "%").first.map(String.init) ?? h   // drop any zone id
-            if bare == "::1" || bare == "::" || bare == "0:0:0:0:0:0:0:1" { return true }
-            if bare.hasPrefix("fe8") || bare.hasPrefix("fe9")
-                || bare.hasPrefix("fea") || bare.hasPrefix("feb") { return true }   // fe80::/10
-            if bare.hasPrefix("fc") || bare.hasPrefix("fd") { return true }         // fc00::/7 ULA
-            if bare.hasPrefix("::ffff:") || bare.hasPrefix("::") {
-                // IPv4-mapped and IPv4-compatible forms carry a v4 address inside.
-                if let tail = bare.split(separator: ":").last, tail.contains("."),
-                   let value = canonicalIPv4(String(tail)) {
-                    return isPrivateIPv4(value)
-                }
-            }
-            return false
-        }
-
-        // Bare single-label hostnames resolve through the local search domain.
-        return !h.contains(".")
-    }
-
-    /// Cloud instance-metadata endpoints. Reaching one from a hijacked agent
-    /// hands over the machine's credentials, so they are called out separately
-    /// from the rest of the private ranges.
-    static func isMetadataHost(_ host: String) -> Bool {
-        var h = host.lowercased()
-        while h.hasSuffix(".") { h.removeLast() }
-        if ["metadata.google.internal", "metadata.goog", "instance-data"].contains(h) { return true }
-        guard let value = canonicalIPv4(h) else { return false }
-        return [0xA9FE_A9FE,   // 169.254.169.254 — AWS / Azure / GCP / DO
-                0xA9FE_AA02,   // 169.254.170.2   — AWS ECS task metadata
-                0x6464_64C8,   // 100.100.100.200 — Alibaba Cloud
-                0xC000_00C0    // 192.0.0.192     — Oracle Cloud
-               ].contains(value)
-    }
 }

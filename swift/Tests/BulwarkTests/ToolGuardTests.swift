@@ -210,7 +210,7 @@ final class ToolGuardTests: XCTestCase {
         // reported public — a one-character bypass of the private-host gate.
         for spelling in ["127.0.0.1", "2130706433", "0177.0.0.1", "0x7f.0.0.1",
                          "127.1", "127.0.1", "localhost.", "LOCALHOST"] {
-            XCTAssertTrue(ToolGuard.isPrivateHost(spelling), "missed \(spelling)")
+            XCTAssertTrue(isPrivateHost(spelling), "missed \(spelling)")
         }
     }
 
@@ -218,22 +218,22 @@ final class ToolGuardTests: XCTestCase {
         for spelling in ["10.1.2.3", "192.168.0.5", "172.16.4.4", "169.254.1.1",
                          "100.64.0.1", "0.0.0.0", "[::1]", "[fe80::1]", "[fd00::1]",
                          "[::ffff:127.0.0.1]", "printer.local", "db.internal", "mybox"] {
-            XCTAssertTrue(ToolGuard.isPrivateHost(spelling), "missed \(spelling)")
+            XCTAssertTrue(isPrivateHost(spelling), "missed \(spelling)")
         }
     }
 
     func testPublicHostsAreNotPrivate() {
         for spelling in ["example.com", "8.8.8.8", "www.reuters.com", "[2606:4700::1111]"] {
-            XCTAssertFalse(ToolGuard.isPrivateHost(spelling), "wrongly flagged \(spelling)")
+            XCTAssertFalse(isPrivateHost(spelling), "wrongly flagged \(spelling)")
         }
     }
 
     func testMetadataEndpointsAreSingledOut() {
         for spelling in ["169.254.169.254", "2852039166", "metadata.google.internal",
                          "100.100.100.200", "192.0.0.192"] {
-            XCTAssertTrue(ToolGuard.isMetadataHost(spelling), "missed \(spelling)")
+            XCTAssertTrue(isMetadataHost(spelling), "missed \(spelling)")
         }
-        XCTAssertFalse(ToolGuard.isMetadataHost("example.com"))
+        XCTAssertFalse(isMetadataHost("example.com"))
     }
 
     func testObfuscatedLoopbackIsBlockedEndToEnd() {
@@ -247,8 +247,8 @@ final class ToolGuardTests: XCTestCase {
 
     func testCanonicalIPv4RejectsNonAddresses() {
         for text in ["1.2.3.4.5", "999.1.1.1", "example.com", "", "0x"] {
-            XCTAssertNil(ToolGuard.canonicalIPv4(text), "wrongly parsed \(text)")
+            XCTAssertNil(parseIPv4(text), "wrongly parsed \(text)")
         }
-        XCTAssertEqual(ToolGuard.canonicalIPv4("8.8.8.8"), 0x0808_0808)
+        XCTAssertEqual(parseIPv4("8.8.8.8"), 0x0808_0808)
     }
 }

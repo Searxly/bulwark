@@ -53,6 +53,7 @@ class Stage(str, Enum):
     SANITIZE = "sanitize"
     DETECT = "detect"
     VALIDATE = "validate"
+    TOOL = "tool"          # agentic loop: tool arguments, outputs, taint
 
 
 @dataclass

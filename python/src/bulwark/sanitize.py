@@ -20,7 +20,18 @@ from .types import Finding, SanitizeResult, Severity, Stage
 _BIDI_CONTROLS = set(range(0x202A, 0x202F)) | set(range(0x2066, 0x206A)) | {0x200E, 0x200F, 0x061C}
 _TAG_CHARS = set(range(0xE0000, 0xE0080))
 _VARIATION_SELECTORS = set(range(0xFE00, 0xFE10)) | set(range(0xE0100, 0xE01F0))
-_ZERO_WIDTH = {0x200B, 0x200C, 0x200D, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xFEFF, 0x180E, 0x00AD}
+_ZERO_WIDTH = {
+    0x200B, 0x200C, 0x200D, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xFEFF, 0x180E, 0x00AD,
+    # Hangul fillers: render as nothing in every browser, and split a trigger
+    # word as effectively as a zero-width space.
+    0x115F, 0x1160, 0x3164, 0xFFA0,
+    # Interlinear annotation controls and the combining grapheme joiner.
+    0xFFF9, 0xFFFA, 0xFFFB, 0x034F,
+    # Line/paragraph separators — invisible line breaks.
+    0x2028, 0x2029,
+    # Mongolian vowel separator and Khmer invisible spacers.
+    0x17B4, 0x17B5,
+}
 
 # Cross-script homoglyphs → ASCII (1:1 so detection offsets stay aligned).
 # Covers the Cyrillic/Greek look-alikes used to disguise trigger words such as
@@ -61,9 +72,24 @@ _HTMLISH_RE = re.compile(r"<(?:/?[a-zA-Z][\w:-]*\b|!--)")
 _TAG_RE = re.compile(r"<[^>]+>")
 
 _HIDDEN_STYLE_RE = re.compile(
-    r"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|font-size\s*:\s*0(?:px|em|rem|%)?\b", re.IGNORECASE
+    r"display\s*:\s*none"
+    r"|visibility\s*:\s*hidden"
+    # Zero only. `opacity:0` hides text; `opacity:0.95` does not, and the
+    # previous pattern matched both — silently deleting visible content.
+    r"|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$|!)"
+    r"|font-size\s*:\s*0(?:\.0+)?(?:px|em|rem|pt|%)?\s*(?:;|$|!)"
+    r"|(?:width|height)\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?\s*(?:;|$|!)"
+    r"|text-indent\s*:\s*-\d{4,}"
+    r"|clip-path\s*:\s*inset\(\s*(?:100%|50%\s+50%)"
+    r"|position\s*:\s*absolute[^;]*;\s*(?:left|top)\s*:\s*-\d{4,}",
+    re.IGNORECASE
 )
-_SKIP_TAGS = {"script", "style", "noscript", "template", "svg", "math", "head"}
+_SKIP_TAGS = {
+    "script", "style", "noscript", "template", "svg", "math", "head",
+    # Fallback content that only renders when the feature is unavailable —
+    # in a scraped page it is text the reader never saw.
+    "noembed", "noframes", "iframe", "object", "applet", "canvas", "audio", "video",
+}
 _BLOCK_TAGS = {
     "p", "div", "br", "li", "ul", "ol", "tr", "table", "section", "article",
     "header", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "hr",
@@ -85,10 +111,84 @@ def fold_leet(text: str) -> str:
     return text.translate(_LEET_TABLE)
 
 
+def strip_marks(text: str) -> str:
+    """Drop combining marks so stacked diacritics can't hide a trigger word.
+
+    ``i̇̈g̈n̈ör̈ë`` reads as "ignore" to a model and to a human squinting at it, but
+    every ASCII signature misses it. Decomposing and dropping category-Mn
+    characters folds it back. Not 1:1 — the result is shorter — so this belongs
+    to the flattened view, which carries its own offset map.
+    """
+    decomposed = unicodedata.normalize("NFD", text)
+    stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    return unicodedata.normalize("NFC", stripped)
+
+
 def fold_detection(text: str) -> str:
     """Build the detector's second-pass copy: fold leetspeak, then cross-script
     homoglyphs. Both are 1:1 so detection offsets stay aligned. Detection-only."""
     return fold_confusables(fold_leet(text))
+
+
+_SOFT_HYPHENS = "-­‐‑"
+
+
+def flatten_for_detection(text: str) -> "Tuple[str, List[int]]":
+    """Collapse whitespace and rejoin hyphenated line breaks, keeping an offset map.
+
+    Signatures join their trigger words with bounded spans like ``.{0,40}?``, and
+    in Python, JavaScript and ICU alike ``.`` does not cross a newline. So the
+    canonical payload — *ignore all previous instructions* — stops matching the
+    moment it is hard-wrapped, which ordinary 72-column text does by accident and
+    an attacker does on purpose. PDF and typeset sources add the second half of
+    the problem: ``dis-\\nregard`` splits the word itself.
+
+    Turning on DOTALL would be the wrong fix. It would let a bounded span reach
+    across paragraph boundaries and pair up words that merely happen to sit near
+    each other, trading a false negative for a false positive.
+
+    Instead this builds a flattened *view*: every whitespace run becomes one
+    space and every hyphen-at-a-line-break is closed up, so proximity limits
+    still mean what they say — they just stop counting line breaks as content.
+    The returned list maps each character of the view back to its offset in the
+    original, so a match found here still reports a span the caller can use.
+    """
+    out: List[str] = []
+    index: List[int] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in _SOFT_HYPHENS and out and out[-1].isalnum():
+            j = i + 1
+            while j < n and text[j] in " \t":
+                j += 1
+            if j < n and text[j] in "\r\n":
+                while j < n and text[j] in "\r\n \t":
+                    j += 1
+                if j < n and text[j].isalnum():
+                    i = j        # drop the hyphen and the break; the word closes up
+                    continue
+        if ch.isspace():
+            if out and out[-1] != " ":
+                out.append(" ")
+                index.append(i)
+            i += 1
+            continue
+        out.append(ch)
+        index.append(i)
+        i += 1
+    return "".join(out), index
+
+
+def map_span(span: "Tuple[int, int]", index: "List[int]", original_length: int) -> "Tuple[int, int]":
+    """Translate a span found in a flattened view back to the original text."""
+    start, end = span
+    if not index:
+        return span
+    start = index[start] if 0 <= start < len(index) else original_length
+    last = min(max(end - 1, 0), len(index) - 1)
+    return start, min(index[last] + 1, original_length)
 
 
 def _is_hidden(attrs: List[Tuple[str, Optional[str]]]) -> bool:
@@ -114,6 +214,17 @@ class _HTMLTextExtractor(HTMLParser):
         self.comments = 0
         self.skipped_blocks = 0
         self.hidden_elements = 0
+
+    def handle_startendtag(self, tag, attrs):  # type: ignore[override]
+        # XHTML self-closing form: `<div style="display:none"/>`. The stdlib
+        # parser routes these here rather than through start+end, and without
+        # this the skip depth went out of balance and hidden subtrees leaked.
+        if tag in _SKIP_TAGS:
+            self.skipped_blocks += 1
+        elif _is_hidden(attrs):
+            self.hidden_elements += 1
+        if tag in _BLOCK_TAGS:
+            self.parts.append("\n")
 
     def handle_starttag(self, tag, attrs):  # type: ignore[override]
         hidden = tag in _SKIP_TAGS or _is_hidden(attrs)
@@ -174,7 +285,8 @@ def strip_invisible(text: str, *, keep_emoji_variation: bool = False) -> "Tuple[
             if keep_emoji_variation and 0xFE00 <= cp <= 0xFE0F:
                 out.append(ch)
                 continue
-            counts["variation_selectors"] = counts.get("variation_selectors", 0) + 1
+            key = "variation_selectors" if 0xFE00 <= cp <= 0xFE0F else "variation_selectors_supplementary"
+            counts[key] = counts.get(key, 0) + 1
             continue
         if cp in _ZERO_WIDTH:
             counts["zero_width"] = counts.get("zero_width", 0) + 1
@@ -200,11 +312,22 @@ def strip_invisible(text: str, *, keep_emoji_variation: bool = False) -> "Tuple[
             f"Removed {counts['bidi_controls']} bidirectional control character(s) (Trojan Source)",
             weight=0.62,
         ))
-    if counts.get("variation_selectors"):
+    # Only the supplementary selectors (U+E0100-E01EF) are a smuggling channel.
+    # U+FE00-FE0F are ordinary emoji presentation selectors: one of those in a
+    # page is not evidence of anything, and reporting it at HIGH severity made
+    # any document containing an emoji score as an attack.
+    if counts.get("variation_selectors_supplementary"):
         findings.append(Finding(
             Stage.SANITIZE, "variation_smuggling", Severity.HIGH,
-            f"Removed {counts['variation_selectors']} variation selector(s) (possible data smuggling)",
+            f"Removed {counts['variation_selectors_supplementary']} supplementary variation "
+            f"selector(s) (a data-smuggling channel)",
             weight=0.66,
+        ))
+    if counts.get("variation_selectors"):
+        findings.append(Finding(
+            Stage.SANITIZE, "variation_selector", Severity.INFO,
+            f"Removed {counts['variation_selectors']} emoji variation selector(s)",
+            weight=0.0,
         ))
     if counts.get("zero_width"):
         findings.append(Finding(

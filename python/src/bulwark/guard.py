@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 from . import detect as _detect
 from . import sanitize as _sanitize
 from . import spotlight as _spotlight
+from . import tripwire as _tripwire
 from .prompt import PromptContext, build_messages, make_canary
 from .types import (
     DetectResult,
@@ -51,6 +52,14 @@ class BulwarkConfig:
     # detect
     detection_threshold: float = 0.5
     use_heuristics: bool = True
+    # Recursively decode encoded payloads (Base64, hex, percent, entities,
+    # ROT13, zero-width bits …) and re-scan each layer. Runs on the raw content,
+    # before sanitization strips the invisible channels.
+    decode_encoded: bool = True
+    # Discount findings that sit inside quoted or code-fenced passages of a
+    # document that reads as writing *about* attacks. Precision, not permission:
+    # weights drop, findings never disappear.
+    use_context: bool = True
     # Refuse to call the model when risk reaches this severity (None = never
     # hard-block; rely on structural defences + output validation instead).
     block_before_llm: Optional[Severity] = None
@@ -68,6 +77,20 @@ class BulwarkConfig:
     redact_output_links: bool = True
     redact_output_images: bool = True
     block_on_output_leak: bool = True
+    # Mark the summary unsafe when it carries a high-severity exfiltration
+    # channel. Without this a reply containing a confirmed exfiltration URL was
+    # still reported SAFE, which is the wrong headline for the caller to act on.
+    block_on_exfiltration: bool = True
+    # Check the reply against the source: hosts, URLs and addresses it mentions
+    # must appear in the document it was asked to summarize.
+    check_grounding: bool = True
+    # The vocabulary-overlap half of grounding. Turn it off when the summary is
+    # requested in a different language than the source, where it means nothing.
+    check_lexical_grounding: bool = True
+    # Plant a positive control in the content and check whether the model obeyed
+    # it. Proof of compliance rather than a symptom — but it *is* an injection
+    # attempt, so a correctly-behaving model will note it. Opt-in; on in paranoid.
+    tripwire: bool = False
 
     @classmethod
     def balanced(cls) -> "BulwarkConfig":
@@ -90,6 +113,7 @@ class BulwarkConfig:
             spotlight_methods=("base64", "delimit"),
             block_before_llm=Severity.HIGH,
             detection_threshold=0.3,
+            tripwire=True,
         )
 
 
@@ -101,6 +125,11 @@ class Bulwark:
         self.llm = llm
 
     # -- building blocks ----------------------------------------------------
+
+    def _truncated(self, content: str) -> str:
+        """The raw content, capped. Kept un-sanitized because the decode stage
+        needs the invisible channels that sanitization strips."""
+        return content[: self.config.max_content_chars]
 
     def sanitize(self, content: str) -> SanitizeResult:
         truncated = len(content) > self.config.max_content_chars
@@ -128,29 +157,33 @@ class Bulwark:
         Never sent to the model."""
         return _sanitize.fold_detection(san.text) if self.config.fold_confusables else None
 
-    def scan(self, content: str) -> DetectResult:
-        """Sanitize + detect only — no model call. Use to gate content yourself."""
-        san = self.sanitize(content)
+    def _detect(self, content: str, san: SanitizeResult) -> DetectResult:
         return _detect.scan(
             san.text,
             threshold=self.config.detection_threshold,
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
             also_scan=self._folded_text(san),
+            also_decode=self._truncated(content) if self.config.decode_encoded else None,
+            use_context=self.config.use_context,
         )
+
+    def scan(self, content: str) -> DetectResult:
+        """Sanitize + detect only — no model call. Use to gate content yourself."""
+        return self._detect(content, self.sanitize(content))
 
     def prepare(self, content: str) -> "PreparedRequest":
         """Sanitize, detect, spotlight and build messages — ready to send to any model."""
         san = self.sanitize(content)
-        det = _detect.scan(
-            san.text,
-            threshold=self.config.detection_threshold,
-            extra_findings=san.findings,
-            use_heuristics=self.config.use_heuristics,
-            also_scan=self._folded_text(san),
-        )
+        det = self._detect(content, san)
+        # The tripwire is planted after detection on purpose: it is
+        # instruction-shaped, and scanning it would inflate the input's own risk
+        # score with Bulwark's own text.
+        wire = _tripwire.make_tripwire() if self.config.tripwire else None
+        content = _tripwire.plant(san.text, wire) if wire else san.text
+
         spot = _spotlight.spotlight(
-            san.text,
+            content,
             methods=self.config.spotlight_methods,
             marker=self.config.marker,
         )
@@ -160,7 +193,8 @@ class Bulwark:
             language=self.config.language,
             extra_instruction=self.config.extra_instruction,
         )
-        return PreparedRequest(messages=messages, context=ctx, sanitize=san, detect=det, spotlight=spot)
+        return PreparedRequest(messages=messages, context=ctx, sanitize=san, detect=det,
+                               spotlight=spot, tripwire=wire)
 
     def finalize(self, raw_output: str, prepared: "PreparedRequest") -> GuardResult:
         """Validate a model reply produced from :meth:`prepare`."""
@@ -170,6 +204,10 @@ class Bulwark:
             redact_links=self.config.redact_output_links,
             redact_images=self.config.redact_output_images,
             block_on_leak=self.config.block_on_output_leak,
+            block_on_exfiltration=self.config.block_on_exfiltration,
+            source=prepared.sanitize.text if self.config.check_grounding else None,
+            check_lexical_grounding=self.config.check_lexical_grounding,
+            tripwire=prepared.tripwire,
         )
         return self._assemble(prepared.sanitize, prepared.detect, val, raw_output, blocked=False)
 
@@ -247,3 +285,4 @@ class PreparedRequest:
     sanitize: SanitizeResult
     detect: DetectResult
     spotlight: SpotlightResult
+    tripwire: Optional["_tripwire.Tripwire"] = None

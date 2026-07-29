@@ -84,6 +84,35 @@ def heuristic_findings(text: str) -> List[Finding]:
     return findings
 
 
+def decoded_findings(text: str, **decode_options) -> List[Finding]:
+    """Signatures that only appear once an encoded payload is decoded.
+
+    A hit inside an encoded layer is *stronger* evidence than the same hit in
+    plaintext, not weaker: ordinary documents contain hashes and tokens, but
+    nobody accidentally Base64-encodes "ignore all previous instructions". So
+    each contaminated layer contributes one high-weight finding rather than
+    re-emitting every match — the latter would let a single payload stack the
+    noisy-OR several times over.
+    """
+    from . import decode as _decode
+
+    findings: List[Finding] = []
+    for layer in _decode.unwrap(text, **decode_options):
+        matches = match_signatures(layer.text)
+        if not matches:
+            continue
+        ids = ", ".join(sorted({m.pattern_id for m in matches if m.pattern_id})[:4])
+        worst = max(matches, key=lambda m: m.weight)
+        findings.append(Finding(
+            Stage.DETECT, "encoded_payload", Severity.CRITICAL,
+            f"A payload hidden under {layer.label} decodes to injection content ({ids})",
+            weight=min(0.92, max(0.80, worst.weight)),
+            excerpt=_excerpt(layer.text, 0, min(len(layer.text), 60)),
+            pattern_id=f"enc.decoded[{layer.label}]",
+        ))
+    return findings
+
+
 def score_findings(findings: Iterable[Finding]) -> float:
     """Combine finding weights with a noisy-OR into a [0, 1] risk score."""
     product = 1.0
@@ -112,25 +141,80 @@ def scan(
     extra_findings: Sequence[Finding] = (),
     use_heuristics: bool = True,
     also_scan: "str | None" = None,
+    also_decode: "str | None" = None,
+    use_context: bool = True,
+    flatten: bool = True,
 ) -> DetectResult:
     """Detect injection signals in ``text`` and produce a :class:`DetectResult`.
 
     ``extra_findings`` (e.g. from sanitization) are included in the score so the
-    result reflects every signal Bulwark has seen. ``also_scan`` is an additional
-    copy of the text run through the same signatures with results merged (used to
-    scan the confusable-folded text so homoglyph disguises are caught *without*
-    breaking detection of legitimate non-Latin scripts on the primary text).
+    result reflects every signal Bulwark has seen.
+
+    ``also_scan`` is an additional copy of the text run through the same
+    signatures with results merged — used for the confusable-folded copy, so
+    homoglyph and leetspeak disguises are caught *without* breaking detection of
+    legitimate non-Latin scripts on the primary text.
+
+    ``also_decode`` is text to recursively decode and re-scan (see
+    :mod:`bulwark.decode`). Pass the **raw**, pre-sanitization content: some
+    channels — zero-width bit strings, tag characters — are removed by
+    sanitization precisely because they are invisible, and decoding them
+    afterwards would find nothing.
+
+    ``use_context`` discounts findings that sit inside quoted or code-fenced
+    passages in a document that reads as writing *about* attacks (see
+    :mod:`bulwark.context`). It reduces weight; it never removes a finding.
     """
+    from .sanitize import flatten_for_detection, map_span, strip_marks
+
     findings: List[Finding] = list(extra_findings)
     findings.extend(match_signatures(text))
+    seen = {f.pattern_id for f in findings if f.pattern_id}
+
+    def merge(new: List[Finding], index: "List[int] | None" = None) -> None:
+        for finding in new:
+            if finding.pattern_id in seen:
+                continue
+            seen.add(finding.pattern_id)
+            if index is not None and finding.span is not None:
+                finding = Finding(
+                    stage=finding.stage, category=finding.category,
+                    severity=finding.severity, message=finding.message,
+                    weight=finding.weight, excerpt=finding.excerpt,
+                    span=map_span(finding.span, index, len(text)),
+                    pattern_id=finding.pattern_id,
+                )
+            findings.append(finding)
+
+    # Homoglyph / leetspeak view — 1:1, so spans need no remapping.
     if also_scan is not None and also_scan != text:
-        seen = {f.pattern_id for f in findings if f.pattern_id}
-        for f in match_signatures(also_scan):
-            if f.pattern_id not in seen:
-                findings.append(f)
-                seen.add(f.pattern_id)
+        merge(match_signatures(also_scan))
+
+    if flatten:
+        # Line-break and hyphenation view. Without it, hard-wrapping the payload
+        # defeats every bounded-span signature in the database.
+        for view in filter(None, (text, also_scan)):
+            flat, index = flatten_for_detection(view)
+            if flat and flat != view:
+                merge(match_signatures(flat), index)
+            # Combining marks stacked on ASCII letters hide trigger words from
+            # every signature; strip them on the flattened view too.
+            unmarked = strip_marks(flat)
+            if unmarked != flat:
+                merge(match_signatures(unmarked))
+
     if use_heuristics:
         findings.extend(heuristic_findings(text))
+
+    if use_context:
+        from . import context as _context
+        findings = _context.apply(text, findings)
+
+    # Decoded findings are added after the context pass on purpose: an encoded
+    # payload has no visible quoting context to sit inside, and discounting it
+    # for the fence around the blob would reward the obfuscation.
+    if also_decode is not None:
+        findings.extend(decoded_findings(also_decode))
 
     score = score_findings(findings)
     risk = bucket(score)

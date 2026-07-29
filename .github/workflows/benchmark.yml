@@ -1,0 +1,62 @@
+name: Benchmark
+
+# The corpus is the reason Bulwark can make claims with numbers attached, so the
+# numbers are defended here. The gate fails a PR that lowers recall, raises the
+# false-positive rate, or turns a previously-caught attack into a miss — even if
+# the aggregate metrics happen to hold up, which corpus growth can mask.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  detection:
+    name: Detection benchmark + regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate the corpus
+        run: python3 tools/corpus.py
+
+      - name: Benchmark
+        run: python3 tools/bench.py
+
+      - name: Regression gate
+        run: python3 tools/bench.py --gate
+
+      - name: Summary for the PR page
+        if: always()
+        run: |
+          {
+            echo '### Detection benchmark'
+            echo '```'
+            python3 tools/bench.py | head -12
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  conformance:
+    name: Cross-language conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: npm ci
+
+      # Swift is not installed on ubuntu-latest by default; the Python and
+      # TypeScript pair still proves the claim for two of the three, and the
+      # Swift job in swift.yml covers its own suite.
+      - name: Compare Python and TypeScript verdicts on the same corpus
+        run: python3 tools/conformance.py --only py,ts --allow-missing

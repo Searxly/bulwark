@@ -1,5 +1,24 @@
 # 🛡️ Bulwark (TypeScript)
 
+> ### ⚠️ 1.0.0 status for this language
+>
+> The repository version is **1.0.0**, but the detection layers and signatures
+> added in 1.0.0 landed in the **Python** implementation only. This package
+> still has the 0.4.0 detection behaviour: the original 70 signatures, no
+> recursive decoding, no output grounding, no quoting-context discounting, and
+> none of the audit fixes — including the one where a single line break defeats
+> the instruction-override signatures.
+>
+> That gap is measured, not estimated. `python3 tools/conformance.py` runs the
+> identical corpus bytes through all three implementations and diffs every
+> verdict; it currently reports **529 divergences across 888 cases**. Bringing
+> this port up to parity is the next piece of work, and the harness will say
+> when it is done.
+>
+> Use the Python package if you need the 1.0.0 behaviour today.
+
+
+
 **An open-source safeguard against prompt injection in AI summarization.**
 
 Summarizing untrusted content (web pages, emails, PDFs, search results) with an

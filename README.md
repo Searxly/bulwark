@@ -10,7 +10,7 @@ you are feeding it **untrusted text**. That text can contain hidden instructions
 naive summarizer will obey them. This is [prompt injection](docs/THREAT_MODEL.md),
 and it is the [#1 risk in the OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).
 
-Bulwark wraps **any** summarization model in five layers of defense so that the
+Bulwark wraps **any** summarization model in seven layers of defense so that the
 content gets summarized — and the attack inside it does not.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
@@ -38,10 +38,19 @@ Python · TypeScript · Swift · zero required dependencies · works with OpenAI
 > isolation, a hardened prompt, and output validation simultaneously." That is a
 > very large difference.
 
-## How it works — five layers
+## How it works — seven layers
 
 ```
   Untrusted content (web page / email / PDF / search result …)
+        │
+        ▼
+  ┌─ 0. DECODE ─────────────────────────────────────────────────┐
+  │  Recursively recover what's been encoded, and re-scan it:     │
+  │   • base64 / base64url / hex / percent / numeric entities     │
+  │   • unicode escapes, decimal codes, ROT13, reversal, Morse    │
+  │   • letter-spacing, zero-width bit strings                    │
+  │  Findings carry their chain: base64 → rot13 → "ignore all …"  │
+  └──────────────────────────────────────────────────────────────┘
         │
         ▼
   ┌─ 1. SANITIZE ───────────────────────────────────────────────┐
@@ -57,8 +66,11 @@ Python · TypeScript · Swift · zero required dependencies · works with OpenAI
         │
         ▼
   ┌─ 2. DETECT ─────────────────────────────────────────────────┐
-  │  Score against 70 signatures (English + 14 languages) + heuristics │
-  │  using a noisy-OR. Block, flag, or just report — your call.   │
+  │  Score 131 signatures (English + 14 languages) + heuristics  │
+  │  over four views of the text — as written, homoglyph-folded, │
+  │  whitespace-flattened, diacritic-stripped — plus every layer │
+  │  DECODE recovered. Combined with a noisy-OR. Quoting context │
+  │  discounts a payload being *discussed* rather than issued.   │
   └──────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -80,9 +92,19 @@ Python · TypeScript · Swift · zero required dependencies · works with OpenAI
         │
         ▼
   ┌─ 5. VALIDATE ───────────────────────────────────────────────┐
-  │  Normalize the reply, then inspect: canary leak? boundary     │
-  │  leak? image/link/data-URL exfiltration? compliance tells?    │
-  │  Redact or block before the summary ever reaches your user.   │
+  │  Normalize the reply, then inspect: canary leak? boundary    │
+  │  leak? any element that *fetches*? data hidden in a path, a  │
+  │  fragment or a subdomain? compliance tells? Detection runs   │
+  │  before redaction, so a rewrite can't erase the evidence of  │
+  │  a finding it already saw.                                   │
+  └──────────────────────────────────────────────────────────────┘
+        │
+        ▼
+  ┌─ 6. GROUND ─────────────────────────────────────────────────┐
+  │  Did this reply come from the document? Every host, URL and  │
+  │  address in the summary must occur in the source. One that   │
+  │  doesn't cannot have come from summarizing it — it came from │
+  │  an instruction the model obeyed.                            │
   └──────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -175,7 +197,7 @@ if (scan(text).injected) { /* … */ }
 
 ## Quick start — Swift
 
-Add via Swift Package Manager: `.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.4.0")`
+Add via Swift Package Manager: `.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "1.0.0")`
 
 ```swift
 import Bulwark
@@ -334,6 +356,38 @@ print(out.piiRedactions)           // how many spans were hidden
 
 ---
 
+## How well does it actually work?
+
+A library that ships regexes without measurements is asking to be trusted on
+vibes. Bulwark grades itself against [a labeled corpus](corpus/) of 888
+documents — 539 attacks across 10 classes and 41 languages, 349 benign controls
+across 81 genres — written independently of the implementation:
+
+```bash
+python3 tools/bench.py          # the numbers, by class, genre and language
+python3 tools/bench.py --gate   # what CI enforces on every PR
+```
+
+|                     | value |
+|---------------------|-------|
+| recall              | **0.388** |
+| precision           | **0.867** |
+| F1                  | **0.536** |
+| false-positive rate | **0.092** (0.029 excluding cases marked deliberately borderline) |
+| scan time           | 1.5 ms median, 7 ms worst case |
+
+Read recall as *"share of hard, realistic attacks caught"*. The corpus is
+adversarially weighted on purpose — it is stacked with the payloads most likely
+to evade a regex-based detector, because those are the ones worth knowing about.
+A number drawn from ordinary traffic would be much larger and much less useful.
+The false-positive rate is the honest one and should be read at face value.
+
+Every attack in the `misses` list is a real weakness with a reproducible test
+case attached. That list *is* the backlog, and it is printed on every run.
+
+CI fails a change that lowers recall, raises the false-positive rate, or turns a
+single previously-caught attack into a miss.
+
 ## What it catches (and what it can't)
 
 **Catches well:** hidden-text smuggling (Unicode tags, zero-width, bidi, nested
@@ -364,11 +418,15 @@ bulwark/
 └── docs/          # threat model + architecture + security review
 ```
 
-All three implementations share the **same signature database, scoring, prompts,
-and behaviour**, produce identical verdicts, and each has a full test suite (71
-Python / 69 TypeScript / 69 Swift, including red-team, multilingual, and evasion
-corpora) run in CI. The hardening work is documented in
-[docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+**Python is the reference implementation.** TypeScript and Swift share the
+original signature database, scoring, prompts and behaviour, but do **not** yet
+have the detection layers and signatures added in 1.0.0. That gap is measured
+rather than assumed: `python3 tools/conformance.py` runs the identical corpus
+bytes through all three and diffs every verdict, and currently reports 529
+divergences across 888 cases. Test suites: 251 Python, 70 TypeScript, 111 Swift,
+all run in CI. The hardening work is documented in
+[docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) and the July 2026 adversarial
+audit in [CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 

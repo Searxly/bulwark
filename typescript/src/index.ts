@@ -18,7 +18,7 @@ import { detect } from "./detect.js";
 import { foldDetection, sanitize } from "./sanitize.js";
 import type { DetectResult } from "./types.js";
 
-export const VERSION = "0.4.0";
+export const VERSION = "1.0.0";
 
 export {
   Bulwark,

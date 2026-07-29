@@ -133,3 +133,66 @@ Presets: `balanced` (default), `strict`, `paranoid`.
 3. **Model-agnostic** — the core never imports an SDK; adapters are optional.
 4. **Zero required dependencies** — trivial to vendor and audit.
 5. **Parity** — Python, TypeScript, and Swift behave identically and are tested as such.
+
+---
+
+## Stages added in 1.0.0
+
+The original five stages are unchanged. These sit around them.
+
+### Stage 0 — `decode` (before sanitize)
+
+Recursively decodes encoded payloads and hands each recovered layer back to the
+detector, keeping a provenance chain. Runs on the **raw** content, because
+sanitization removes exactly the channels (zero-width bit strings, tag
+characters) that need decoding. Depth, layer count, per-extractor candidates and
+total decoded size are all capped — decoding is work an attacker asks us to do.
+
+### Stage 2a — detection views
+
+Signatures join their trigger words with bounded spans (`.{0,40}?`), and `.`
+does not cross a newline in Python, JavaScript or ICU. So the detector runs over
+four views of the same text:
+
+| view | why |
+|---|---|
+| as written | spans map 1:1 |
+| homoglyph + leetspeak folded | `іgnоrе`, `1gn0r3` — 1:1, spans still map |
+| whitespace-flattened, hyphen-rejoined | hard-wrapped and PDF-hyphenated payloads; carries an offset map |
+| combining marks stripped | stacked diacritics hiding a trigger word |
+
+DOTALL would have been the wrong fix for the wrapping problem: it lets a bounded
+span pair up words in different paragraphs, trading a false negative for a false
+positive.
+
+### Stage 2b — `context`
+
+Discounts findings that sit inside quoted or code-fenced passages of a document
+that reads as writing *about* attacks. A single signal earns a small discount;
+the discount deepens only as independent signals stack, and is floored well
+above zero. The design property that makes this safe: to earn the largest
+discount an attacker must fence the payload, quote it, frame it as a malicious
+example and make the whole page read as security writing — spending the attack's
+own persuasive power telling the model the text is a specimen.
+
+### Stage 6 — `grounding`
+
+Every host, URL and email address in the reply must occur in the source. This is
+the sharpest available signal that a model was steered, because a reference that
+is not in the document cannot have come from summarizing it.
+
+### Off to the side
+
+- **`segment`** — per-passage scores, a contamination ratio, and `neutralize()`
+  to excise only the poisoned passages.
+- **`tripwire`** — a planted positive control; an echo is *proof* of compliance.
+- **`session`** — a payload split across several sources.
+- **`urlcheck`** — host canonicalization and URL analysis, shared by `validate`
+  and `toolguard`.
+- **`toolguard`** / **`rampart`** — the agentic-loop and sensitive-value layers.
+
+### Measurement
+
+`corpus/` holds the ground-truth corpus; `tools/bench.py` grades against it and
+gates CI; `tools/conformance.py` diffs the three implementations on identical
+bytes. See [corpus/README.md](../corpus/README.md).

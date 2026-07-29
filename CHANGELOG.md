@@ -4,6 +4,135 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] —
+
+The measurement release. Bulwark now grades itself against a labeled corpus,
+defends those numbers in CI, and has been through a large adversarial audit
+whose confirmed findings are fixed and locked in with regression tests.
+
+**The Python implementation is the reference for everything below. TypeScript
+and Swift have not yet received the new detection layers or signatures** — the
+new `tools/conformance.py` harness measures that gap rather than assuming it
+away, and currently reports 529 divergences across the 888-case corpus. The
+previous README claim that the three implementations "produce identical
+verdicts" was never tested and is not true today; it has been replaced with the
+measured number.
+
+### Measured
+
+- **Shared ground-truth corpus** (`corpus/`) — 888 labeled documents: 539
+  attacks across 10 classes and 41 languages, 349 benign controls across 81
+  genres, including a deliberate false-positive minefield of security writing,
+  LLM API docs, changelogs, recipes and legal boilerplate. Written independently
+  of the implementation, so a failing case is a bug report rather than a
+  tautology.
+- **`tools/bench.py`** — precision, recall, F1 and false-positive rate, broken
+  down by attack class, benign genre and language, with the missed attacks and
+  false positives listed by id. `--gate` fails CI on any regression, including
+  a single previously-caught attack becoming a miss.
+- **`tools/conformance.py`** — runs the identical corpus bytes through all three
+  implementations and diffs verdict, score, risk and fired signature ids.
+- Baseline at 1.0.0: **recall 0.388, precision 0.867, F1 0.536, FPR 0.092**
+  (0.029 excluding cases marked deliberately borderline). Read recall as "share
+  of hard, realistic attacks caught" — the corpus is adversarially weighted on
+  purpose, not a sample of ordinary traffic.
+
+### Added — new defensive layers (Python)
+
+- **`decode`** — recursively decodes encoded payloads and re-scans each layer,
+  keeping a provenance chain (`base64 → rot13 → "ignore all previous…"`).
+  Covers Base64/Base64url, hex, percent-encoding, numeric HTML entities, unicode
+  escapes, decimal char codes, ROT13, reversal, letter-spacing, Morse and
+  zero-width bit strings. Runs on the raw content, before sanitization removes
+  the invisible channels. Depth, layer count and total decoded size are capped.
+- **`grounding`** — checks the reply against the source. Every host, URL and
+  email address in a summary must occur in the document it summarized; a novel
+  one cannot have come from summarizing and is reported `critical`. A weaker
+  lexical-overlap measure backs it up, skippable for cross-language summaries.
+- **`context`** — tells a document that *performs* an attack from one that
+  *discusses* one, by combining quoting constructs with meta-discourse. Discount
+  deepens only as independent signals stack, and is floored well above zero, so
+  it can never become a bypass.
+- **`segment`** — scores each passage separately and reports a contamination
+  ratio. `neutralize()` excises only the poisoned passages, so one hostile
+  paragraph no longer costs the whole article.
+- **`tripwire`** — plants a harmless positive control in the content. If the
+  model echoes the code, it provably followed an instruction from the data.
+  Opt-in; on in `paranoid`.
+- **`session`** — catches a payload split across several sources so that no
+  single document is injected but their concatenation is.
+- **`urlcheck`** — canonicalizes hosts the way the network stack does (the full
+  `inet_aton` grammar, IPv6, IPv4-mapped), then classifies: private ranges,
+  cloud metadata endpoints, userinfo tricks, punycode and mixed-script
+  homographs, and opaque payloads in a query, path, fragment or subdomain.
+- **`rampart`** (Python port) — deterministic redaction of sensitive values,
+  now covering 12 classes including API keys, JWTs, private keys, crypto
+  addresses, MAC addresses and national IDs. IBANs are mod-97 validated.
+- **`toolguard`** (Python port) — the agentic-loop safeguards, with recursive
+  argument traversal, `urlcheck`-backed URL analysis, thread safety, and a new
+  **echo check**: a call aimed at a host named by content that scanned as
+  injected is refused outright, and that memory survives clearing the taint.
+
+### Fixed — from the adversarial audit
+
+- **A single line break defeated the flagship signatures.** Bounded spans like
+  `.{0,40}?` do not cross a newline in any of the three regex engines, so
+  ordinary 72-column wrapping dropped "ignore all previous instructions" from
+  0.86 to 0.00. Detection now also runs over a flattened view that collapses
+  whitespace and rejoins hyphenated line breaks, carrying an offset map so
+  spans still point at the original text. (DOTALL would have been the wrong
+  fix — it lets a bounded span pair up words in different paragraphs.)
+- Intra-word hyphenation (`dis-\nregard`), stacked combining diacritics, Hangul
+  fillers, interlinear annotation controls and the combining grapheme joiner all
+  defeated every signature; each is now handled.
+- **`^\s*` under MULTILINE was quadratic** — 200KB of newlines wedged the
+  scanner. Three signatures were affected.
+- A single emoji variation selector produced a `high` "data smuggling" finding,
+  which the severity rule turned into `injected=true` for any document
+  containing an emoji.
+- The hidden-CSS pattern matched *any* opacity and font-size value, so
+  `opacity:0.95` silently deleted visible article text.
+- XHTML self-closing syntax unbalanced the HTML skip depth, leaking hidden
+  subtrees to the model.
+- Over-broad signatures that scored ordinary documentation as an attack — every
+  markdown image, every `curl https://`, every mention of "jailbreak", every
+  "run the script" and "drop the table" — are now paired: a low-weight broad
+  member keeps coverage, a high-weight specific member carries the confidence.
+- **Output validation** — covered only `<img>`; now covers every element that
+  fetches, plus CSS `url()`, reference-style links and images, autolinks, bare
+  domains and non-HTTP schemes. Data in a path, fragment or subdomain counts
+  like data in a query string. The canary check is no longer a case-sensitive
+  substring match, so a spaced-out or emphasis-split echo still counts. All
+  seven system-prompt rules are fingerprinted, not three. A confirmed
+  exfiltration channel now marks the summary unsafe instead of reporting SAFE.
+  Detection runs before redaction, so a rewrite can no longer erase the evidence
+  of a finding it had already seen.
+
+### Fixed — Swift
+
+- **`Rampart.rehydrate` was not injective.** An attacker who planted `[EMAIL_1]`
+  in a page and got the model to echo it made a rehydrating host substitute a
+  *real* address into text the attacker could read. Placeholders now carry a
+  per-redaction random nonce, so a planted token stays literal.
+- **`ToolGuard.isPrivateHost` missed every non-canonical loopback spelling** —
+  `0177.0.0.1`, `0x7f.0.0.1`, `2130706433`, `127.1`, `localhost.`. Hosts are now
+  canonicalized through the full `inet_aton` grammar, and cloud metadata
+  endpoints are called out separately.
+- `foldConfusables` and `foldLeet` iterated grapheme clusters, so a single
+  combining mark defeated the whole homoglyph and leetspeak fold. Both now
+  iterate unicode scalars.
+- `keepPIIEntities` was applied after overlap resolution and honoured neither
+  way; placeholders were numbered right-to-left, so `[EMAIL_1]` was the *last*
+  email in the document.
+
+### Known gaps
+
+- TypeScript and Swift do not yet have the new layers, signatures or fixes
+  above. `tools/conformance.py` reports the gap precisely.
+- The remaining audit findings specific to the TypeScript and Swift sanitizers
+  (entity coverage, tag scanning, attribute matching, `\b`/`\w` ASCII semantics)
+  are unfixed.
+
 ## [0.5.0] — 
 
 Privacy on the output side: PII redaction for tool results.

@@ -5,7 +5,10 @@
  * single one saturating the score.
  */
 
+import { apply as applyContext } from "./context.js";
+import { unwrap } from "./decode.js";
 import { SIGNATURES } from "./patterns.js";
+import { flattenForDetection, mapSpan, stripMarks } from "./sanitize.js";
 import type { DetectResult, Finding, Severity } from "./types.js";
 import { severityGte } from "./types.js";
 
@@ -92,6 +95,34 @@ export function bucket(score: number): Severity {
   return "info";
 }
 
+/** Signatures that only appear once an encoded payload is decoded.
+ *
+ * A hit inside an encoded layer is *stronger* evidence than the same hit in
+ * plaintext, not weaker: ordinary documents contain hashes and tokens, but
+ * nobody accidentally Base64-encodes "ignore all previous instructions". So
+ * each contaminated layer contributes one high-weight finding rather than
+ * re-emitting every match, which would let a single payload stack the
+ * noisy-OR several times over. */
+export function decodedFindings(text: string): Finding[] {
+  const findings: Finding[] = [];
+  for (const layer of unwrap(text)) {
+    const matches = matchSignatures(layer.text);
+    if (matches.length === 0) continue;
+    const ids = [...new Set(matches.map((m) => m.patternId).filter(Boolean))].sort().slice(0, 4).join(", ");
+    const worst = matches.reduce((a, b) => (b.weight > a.weight ? b : a));
+    findings.push({
+      stage: "detect",
+      category: "encoded_payload",
+      severity: "critical",
+      weight: Math.min(0.92, Math.max(0.8, worst.weight)),
+      message: `A payload hidden under ${layer.label} decodes to injection content (${ids})`,
+      excerpt: layer.text.slice(0, 60),
+      patternId: `enc.decoded[${layer.label}]`,
+    });
+  }
+  return findings;
+}
+
 export interface DetectOptions {
   threshold?: number;
   extraFindings?: Finding[];
@@ -100,21 +131,63 @@ export interface DetectOptions {
    * merged (used for the confusable-folded copy so homoglyph disguises are
    * caught without breaking detection of legitimate non-Latin scripts). */
   alsoScan?: string;
+  /** Text to recursively decode and re-scan. Pass the **raw**, pre-sanitization
+   * content: channels such as zero-width bit strings are removed by
+   * sanitization precisely because they are invisible, and decoding them
+   * afterwards would find nothing. */
+  alsoDecode?: string;
+  /** Discount findings that sit inside quoted or code-fenced passages of a
+   * document that reads as writing *about* attacks. Reduces weight; never
+   * removes a finding. */
+  useContext?: boolean;
+  /** Also scan a whitespace-flattened, de-hyphenated view. Without it, hard
+   * wrapping the payload defeats every bounded-span signature. */
+  flatten?: boolean;
 }
 
 export function detect(text: string, opts: DetectOptions = {}): DetectResult {
-  const { threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan } = opts;
-  const findings: Finding[] = [...extraFindings, ...matchSignatures(text)];
-  if (alsoScan !== undefined && alsoScan !== text) {
-    const seen = new Set(findings.map((f) => f.patternId).filter(Boolean));
-    for (const f of matchSignatures(alsoScan)) {
-      if (!seen.has(f.patternId)) {
-        findings.push(f);
-        seen.add(f.patternId);
-      }
+  const {
+    threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan,
+    alsoDecode, useContext = true, flatten = true,
+  } = opts;
+  let findings: Finding[] = [...extraFindings, ...matchSignatures(text)];
+  const seenIds = new Set(findings.map((f) => f.patternId).filter(Boolean));
+
+  const merge = (incoming: Finding[], index?: number[]): void => {
+    for (const f of incoming) {
+      if (seenIds.has(f.patternId)) continue;
+      seenIds.add(f.patternId);
+      findings.push(
+        index && f.span
+          ? { ...f, span: mapSpan(f.span as [number, number], index, text.length) }
+          : f,
+      );
+    }
+  };
+
+  // Homoglyph / leetspeak view — 1:1, so spans need no remapping.
+  if (alsoScan !== undefined && alsoScan !== text) merge(matchSignatures(alsoScan));
+
+  if (flatten) {
+    for (const view of [text, alsoScan]) {
+      if (view === undefined) continue;
+      const flat = flattenForDetection(view);
+      if (flat.text && flat.text !== view) merge(matchSignatures(flat.text), flat.index);
+      // Combining marks stacked on ASCII letters hide trigger words from every
+      // signature; strip them on the flattened view too.
+      const unmarked = stripMarks(flat.text);
+      if (unmarked !== flat.text) merge(matchSignatures(unmarked));
     }
   }
+
   if (useHeuristics) findings.push(...heuristicFindings(text));
+
+  if (useContext) findings = applyContext(text, findings);
+
+  // Decoded findings are added after the context pass on purpose: an encoded
+  // payload has no visible quoting context to sit inside, and discounting it
+  // for the fence around the blob would reward the obfuscation.
+  if (alsoDecode !== undefined) findings.push(...decodedFindings(alsoDecode));
 
   const score = scoreFindings(findings);
   const risk = bucket(score);

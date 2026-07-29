@@ -9,6 +9,15 @@ import type { Finding, SanitizeResult } from "./types.js";
 
 const ZERO_WIDTH = new Set([
   0x200b, 0x200c, 0x200d, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0xfeff, 0x180e, 0x00ad,
+  // Hangul fillers render as nothing in every browser and split a trigger word
+  // as effectively as a zero-width space.
+  0x115f, 0x1160, 0x3164, 0xffa0,
+  // Interlinear annotation controls and the combining grapheme joiner.
+  0xfff9, 0xfffa, 0xfffb, 0x034f,
+  // Line and paragraph separators: invisible line breaks.
+  0x2028, 0x2029,
+  // Mongolian vowel separator and Khmer invisible spacers.
+  0x17b4, 0x17b5,
 ]);
 const BIDI = new Set([0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200e, 0x200f, 0x061c]);
 
@@ -61,7 +70,10 @@ export function foldDetection(text: string): string {
   return foldConfusables(foldLeet(text));
 }
 
-const HIDDEN_STYLE_RE = /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|font-size\s*:\s*0(?:px|em|rem|%)?\b/i;
+// Zero only. `opacity:0` hides text; `opacity:0.95` does not, and the previous
+// pattern matched both, silently deleting visible article text.
+const HIDDEN_STYLE_RE =
+  /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$|!)|font-size\s*:\s*0(?:\.0+)?(?:px|em|rem|pt|%)?\s*(?:;|$|!)|(?:width|height)\s*:\s*0(?:\.0+)?(?:px|em|rem|%)?\s*(?:;|$|!)|text-indent\s*:\s*-\d{4,}|clip-path\s*:\s*inset\(\s*(?:100%|50%\s+50%)|position\s*:\s*absolute[^;]*;\s*(?:left|top)\s*:\s*-\d{4,}/i;
 const HIDDEN_ATTR_RE = /(?:^|\s)hidden(?=[\s=>]|$)/i;
 const ARIA_HIDDEN_RE = /aria-hidden\s*=\s*["']?true/i;
 const WS_RE = /[^\S\n]+/g;
@@ -113,7 +125,10 @@ export function stripInvisible(text: string, keepEmojiVariation = false): StripR
       bump("bidi_controls");
     } else if (isVariationSelector(cp)) {
       if (keepEmojiVariation && cp >= 0xfe00 && cp <= 0xfe0f) out.push(ch);
-      else bump("variation_selectors");
+      // Only the supplementary selectors are a smuggling channel. U+FE00-FE0F
+      // are ordinary emoji presentation selectors, and reporting one at HIGH
+      // severity made every document containing an emoji score as an attack.
+      else bump(cp >= 0xfe00 && cp <= 0xfe0f ? "variation_selectors" : "variation_selectors_supplementary");
     } else if (ZERO_WIDTH.has(cp)) {
       bump("zero_width");
     } else if (ch === "\t" || ch === "\n" || ch === "\r") {
@@ -130,8 +145,10 @@ export function stripInvisible(text: string, keepEmojiVariation = false): StripR
     findings.push({ stage: "sanitize", category: "ascii_smuggling", severity: "critical", weight: 0.9, message: `Removed ${counts.tag_chars} Unicode Tag character(s) used to smuggle hidden text` });
   if (counts.bidi_controls)
     findings.push({ stage: "sanitize", category: "bidi_control", severity: "high", weight: 0.62, message: `Removed ${counts.bidi_controls} bidirectional control character(s) (Trojan Source)` });
+  if (counts.variation_selectors_supplementary)
+    findings.push({ stage: "sanitize", category: "variation_smuggling", severity: "high", weight: 0.66, message: `Removed ${counts.variation_selectors_supplementary} supplementary variation selector(s) (a data-smuggling channel)` });
   if (counts.variation_selectors)
-    findings.push({ stage: "sanitize", category: "variation_smuggling", severity: "high", weight: 0.66, message: `Removed ${counts.variation_selectors} variation selector(s) (possible data smuggling)` });
+    findings.push({ stage: "sanitize", category: "variation_selector", severity: "info", weight: 0, message: `Removed ${counts.variation_selectors} emoji variation selector(s)` });
   if (counts.zero_width)
     findings.push({ stage: "sanitize", category: "zero_width", severity: "low", weight: 0.24, message: `Removed ${counts.zero_width} zero-width character(s) (often used to split trigger words)` });
   if (counts.control_chars)
@@ -195,7 +212,15 @@ export function stripHtml(text: string): StripResult {
       body = body.slice(0, -1);
     }
     const m = TAG_NAME_RE.exec(body);
-    if (!m) continue;
+    if (!m) {
+      // Not a tag name, so this is not a tag — it is text that happens to sit
+      // between angle brackets. Emitting it is what an HTML parser does, and
+      // dropping it silently deletes exactly the payloads that matter:
+      // `<|im_start|>` and the other chat-template tokens are not valid tags,
+      // and discarding them removed the evidence before the detector ran.
+      emit(text.slice(lt, gt + 1));
+      continue;
+    }
     const tag = m[1]!.toLowerCase();
     const attrStr = body.slice(m[1]!.length);
 
@@ -283,4 +308,81 @@ export function sanitize(text: string, opts: SanitizeOptions = {}): SanitizeResu
   working = normalizeUnicode ? normalize(working) : working.replace(WS_RE, " ").trim();
 
   return { text: working, originalLength, cleanedLength: working.length, removed, findings };
+}
+
+/** Drop combining marks so stacked diacritics can't hide a trigger word.
+ *
+ * `i̇̈g̈n̈ör̈ë` reads as "ignore" to a model and to a human squinting at it, but
+ * matches no ASCII signature. Decomposing and dropping the marks folds it back.
+ * Not 1:1 — the result is shorter — so this belongs to the flattened view,
+ * which carries its own offset map. */
+export function stripMarks(text: string): string {
+  return text.normalize("NFD").replace(/\p{Mn}/gu, "").normalize("NFC");
+}
+
+const SOFT_HYPHENS = new Set(["-", "\u00ad", "\u2010", "\u2011"]);
+
+/** Collapse whitespace and rejoin hyphenated line breaks, keeping an offset map.
+ *
+ * Signatures join their trigger words with bounded spans like `.{0,40}?`, and
+ * `.` does not cross a newline in JavaScript any more than in Python or ICU. So
+ * the canonical payload stops matching the moment it is hard-wrapped, which
+ * ordinary 72-column text does by accident and an attacker does on purpose.
+ * PDF and typeset sources add the second half: `dis-\nregard` splits the word.
+ *
+ * The `s` flag would be the wrong fix — it lets a bounded span reach across
+ * paragraphs and pair up words that merely sit near each other, trading a false
+ * negative for a false positive. This builds a flattened *view* instead, so
+ * proximity limits still mean what they say; they just stop counting line
+ * breaks as content. The returned array maps each character of the view back to
+ * its offset in the original. */
+export function flattenForDetection(text: string): { text: string; index: number[] } {
+  const out: string[] = [];
+  const index: number[] = [];
+  const chars = [...text];
+  // Map code-point positions back to UTF-16 offsets, which is what callers index by.
+  const offsets: number[] = [];
+  let at = 0;
+  for (const ch of chars) {
+    offsets.push(at);
+    at += ch.length;
+  }
+
+  const WORDY = /[\p{L}\p{N}]/u;
+  let i = 0;
+  while (i < chars.length) {
+    const ch = chars[i]!;
+    if (SOFT_HYPHENS.has(ch) && out.length > 0 && WORDY.test(out[out.length - 1]!)) {
+      let j = i + 1;
+      while (j < chars.length && (chars[j] === " " || chars[j] === "\t")) j++;
+      if (j < chars.length && (chars[j] === "\r" || chars[j] === "\n")) {
+        while (j < chars.length && /[\r\n \t]/.test(chars[j]!)) j++;
+        if (j < chars.length && WORDY.test(chars[j]!)) {
+          i = j; // drop the hyphen and the break; the word closes up
+          continue;
+        }
+      }
+    }
+    if (/\s/.test(ch)) {
+      if (out.length > 0 && out[out.length - 1] !== " ") {
+        out.push(" ");
+        index.push(offsets[i]!);
+      }
+      i++;
+      continue;
+    }
+    out.push(ch);
+    index.push(offsets[i]!);
+    i++;
+  }
+  return { text: out.join(""), index };
+}
+
+/** Translate a span found in a flattened view back to the original text. */
+export function mapSpan(span: [number, number], index: number[], originalLength: number): [number, number] {
+  const [start, end] = span;
+  if (index.length === 0) return span;
+  const s = start >= 0 && start < index.length ? index[start]! : originalLength;
+  const last = Math.min(Math.max(end - 1, 0), index.length - 1);
+  return [s, Math.min(index[last]! + 1, originalLength)];
 }

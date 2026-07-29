@@ -7,6 +7,7 @@ import { bucket, detect, scoreFindings } from "./detect.js";
 import { buildMessages } from "./prompt.js";
 import { DEFAULT_MARKER, spotlight } from "./spotlight.js";
 import { foldDetection, sanitize } from "./sanitize.js";
+import { makeTripwire, plant as plantTripwire, type Tripwire } from "./tripwire.js";
 import { validateOutput } from "./validate.js";
 import {
   formatReport,
@@ -34,6 +35,14 @@ export interface BulwarkConfig {
   // detect
   detectionThreshold: number;
   useHeuristics: boolean;
+  /** Recursively decode encoded payloads (Base64, hex, percent, entities,
+   * ROT13, zero-width bits …) and re-scan each layer. Runs on the raw content,
+   * before sanitization strips the invisible channels. */
+  decodeEncoded: boolean;
+  /** Discount findings that sit inside quoted or code-fenced passages of a
+   * document that reads as writing *about* attacks. Precision, not permission:
+   * weights drop, findings never disappear. */
+  useContext: boolean;
   /** Refuse to call the model when risk reaches this severity (null = never). */
   blockBeforeLlm: Severity | null;
   // spotlight
@@ -47,6 +56,20 @@ export interface BulwarkConfig {
   redactOutputLinks: boolean;
   redactOutputImages: boolean;
   blockOnOutputLeak: boolean;
+  /** Mark the summary unsafe when it carries a high-severity exfiltration
+   * channel. Without this a reply containing a confirmed exfiltration URL was
+   * still reported SAFE, which is the wrong headline to act on. */
+  blockOnExfiltration: boolean;
+  /** Check the reply against the source: hosts, URLs and addresses it mentions
+   * must appear in the document it was asked to summarize. */
+  checkGrounding: boolean;
+  /** The vocabulary-overlap half of grounding. Turn it off when the summary is
+   * requested in a different language than the source. */
+  checkLexicalGrounding: boolean;
+  /** Plant a positive control in the content and check whether the model obeyed
+   * it. Proof of compliance rather than a symptom — but it *is* an injection
+   * attempt, so a correctly-behaving model will note it. Opt-in. */
+  tripwire: boolean;
 }
 
 export function balancedConfig(): BulwarkConfig {
@@ -58,6 +81,8 @@ export function balancedConfig(): BulwarkConfig {
     maxContentChars: 200_000,
     detectionThreshold: 0.5,
     useHeuristics: true,
+    decodeEncoded: true,
+    useContext: true,
     blockBeforeLlm: null,
     spotlightMethods: ["delimit"],
     marker: DEFAULT_MARKER,
@@ -67,6 +92,10 @@ export function balancedConfig(): BulwarkConfig {
     redactOutputLinks: true,
     redactOutputImages: true,
     blockOnOutputLeak: true,
+    blockOnExfiltration: true,
+    checkGrounding: true,
+    checkLexicalGrounding: true,
+    tripwire: false,
   };
 }
 
@@ -77,7 +106,7 @@ export function strictConfig(): BulwarkConfig {
 
 /** Base64-encodes content and blocks on HIGH risk. Maximum safety, some quality cost. */
 export function paranoidConfig(): BulwarkConfig {
-  return { ...balancedConfig(), spotlightMethods: ["base64", "delimit"], blockBeforeLlm: "high", detectionThreshold: 0.3 };
+  return { ...balancedConfig(), spotlightMethods: ["base64", "delimit"], blockBeforeLlm: "high", detectionThreshold: 0.3, tripwire: true };
 }
 
 export interface PreparedRequest {
@@ -86,6 +115,8 @@ export interface PreparedRequest {
   sanitize: SanitizeResult;
   detect: DetectResult;
   spotlight: SpotlightResult;
+  /** The planted positive control, when `BulwarkConfig.tripwire` is on. */
+  tripwire?: Tripwire;
 }
 
 export class Bulwark {
@@ -123,33 +154,46 @@ export class Bulwark {
     return this.config.foldConfusables ? foldDetection(san.text) : undefined;
   }
 
-  /** Sanitize + detect only — no model call. Use to gate content yourself. */
-  scan(content: string): DetectResult {
-    const san = this.sanitize(content);
+  /** The raw content, capped. Kept un-sanitized because the decode stage needs
+   * the invisible channels that sanitization strips. */
+  private truncated(content: string): string {
+    return content.slice(0, this.config.maxContentChars);
+  }
+
+  private runDetect(content: string, san: SanitizeResult): DetectResult {
     return detect(san.text, {
       threshold: this.config.detectionThreshold,
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
       alsoScan: this.foldedText(san),
+      alsoDecode: this.config.decodeEncoded ? this.truncated(content) : undefined,
+      useContext: this.config.useContext,
     });
+  }
+
+  /** Sanitize + detect only — no model call. Use to gate content yourself. */
+  scan(content: string): DetectResult {
+    return this.runDetect(content, this.sanitize(content));
   }
 
   /** Sanitize, detect, spotlight and build messages — ready for any model. */
   prepare(content: string): PreparedRequest {
     const san = this.sanitize(content);
-    const det = detect(san.text, {
-      threshold: this.config.detectionThreshold,
-      extraFindings: san.findings,
-      useHeuristics: this.config.useHeuristics,
-      alsoScan: this.foldedText(san),
-    });
-    const spot = spotlight(san.text, { methods: this.config.spotlightMethods, marker: this.config.marker });
+    const det = this.runDetect(content, san);
+
+    // The tripwire is planted after detection on purpose: it is
+    // instruction-shaped, and scanning it would inflate the input's own risk
+    // score with Bulwark's own text.
+    const wire = this.config.tripwire ? makeTripwire() : undefined;
+    const body = wire ? plantTripwire(san.text, wire) : san.text;
+
+    const spot = spotlight(body, { methods: this.config.spotlightMethods, marker: this.config.marker });
     const { messages, context } = buildMessages(spot, {
       maxWords: this.config.maxWords,
       language: this.config.language,
       extraInstruction: this.config.extraInstruction,
     });
-    return { messages, context, sanitize: san, detect: det, spotlight: spot };
+    return { messages, context, sanitize: san, detect: det, spotlight: spot, tripwire: wire };
   }
 
   /** Validate a model reply produced from `prepare`. */

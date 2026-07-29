@@ -23,6 +23,12 @@ jobs:
       - name: Validate the corpus
         run: python3 tools/corpus.py
 
+      # The signature database exists once, in Python, and the other two are
+      # generated from it. Three hand-maintained copies is how they drifted the
+      # first time.
+      - name: Generated signature databases are up to date
+        run: python3 tools/gen_patterns.py --check
+
       - name: Benchmark
         run: python3 tools/bench.py
 

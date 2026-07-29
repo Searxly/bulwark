@@ -31,8 +31,50 @@ private let confusables: [Character: Character] = [
 ]
 
 /// Map cross-script homoglyphs to ASCII. Detection-only — never send to a model.
+///
+/// Iterates unicode *scalars*, not Characters. A Swift Character is a grapheme
+/// cluster, so "о" followed by a combining mark is one Character that is not in
+/// the table — meaning a single combining accent used to defeat the entire
+/// homoglyph fold. Folding per scalar and dropping combining marks first closes
+/// that off; the result stays 1:1 with the scalar view, which is what the
+/// detector indexes.
 public func foldConfusables(_ text: String) -> String {
-    String(text.map { confusables[$0] ?? $0 })
+    var out = String.UnicodeScalarView()
+    for scalar in text.unicodeScalars {
+        if let ch = Character.fromScalar(scalar), let folded = confusables[ch], let f = folded.unicodeScalars.first {
+            out.append(f)
+        } else {
+            out.append(scalar)
+        }
+    }
+    return String(out)
+}
+
+/// Drop combining marks so stacked diacritics can't hide a trigger word:
+/// "i̇̈g̈n̈ör̈ë" reads as "ignore" to a model but matches no ASCII signature.
+public func stripMarks(_ text: String) -> String {
+    let decomposed = text.decomposedStringWithCanonicalMapping
+    var out = String.UnicodeScalarView()
+    for scalar in decomposed.unicodeScalars where !isCombiningMark(scalar) {
+        out.append(scalar)
+    }
+    return String(String(out).precomposedStringWithCanonicalMapping)
+}
+
+private func isCombiningMark(_ scalar: Unicode.Scalar) -> Bool {
+    switch scalar.value {
+    case 0x0300...0x036F, 0x1AB0...0x1AFF, 0x1DC0...0x1DFF,
+         0x20D0...0x20FF, 0xFE20...0xFE2F, 0x0483...0x0489,
+         0x0591...0x05BD, 0x0610...0x061A, 0x064B...0x065F, 0x0670,
+         0x06D6...0x06DC, 0x0951...0x0954, 0x0E31, 0x0E34...0x0E3A:
+        return true
+    default:
+        return false
+    }
+}
+
+private extension Character {
+    static func fromScalar(_ scalar: Unicode.Scalar) -> Character? { Character(scalar) }
 }
 
 // Leetspeak / digit-substitution → ASCII letters (1:1, offsets stay aligned).
@@ -43,8 +85,17 @@ private let leet: [Character: Character] = [
 ]
 
 /// Map common leetspeak substitutions to ASCII letters. Detection-only.
+/// Scalar-wise for the same reason as `foldConfusables`.
 public func foldLeet(_ text: String) -> String {
-    String(text.map { leet[$0] ?? $0 })
+    var out = String.UnicodeScalarView()
+    for scalar in text.unicodeScalars {
+        if let folded = leet[Character(scalar)], let f = folded.unicodeScalars.first {
+            out.append(f)
+        } else {
+            out.append(scalar)
+        }
+    }
+    return String(out)
 }
 
 /// Detector's second-pass copy: fold leetspeak, then cross-script homoglyphs.

@@ -44,13 +44,24 @@ public struct RampartRedaction: Sendable {
     public let summary: String
     /// placeholder → original value, for `rehydrate` when you control the reply channel.
     public let map: [String: String]
+    /// The random suffix carried by every placeholder in this redaction. An
+    /// attacker cannot guess it, so a placeholder planted in the source text can
+    /// never be rehydrated into a real value.
+    public let nonce: String
 }
 
 /// Deterministic PII redaction. Stateless; call `redact` per piece of text.
 public enum Rampart {
 
     /// Regex that finds every placeholder this layer mints, for `rehydrate`.
-    static let placeholderPattern = try! NSRegularExpression(pattern: #"\[[A-Z][A-Z_]*_\d+\]"#)
+    /// The trailing hex group is the per-redaction nonce (see `redact`).
+    static let placeholderPattern = try! NSRegularExpression(pattern: #"\[[A-Z][A-Z_]*_\d+_[0-9a-f]{4}\]"#)
+
+    /// Four random hex digits, drawn once per redaction and embedded in every
+    /// placeholder it mints.
+    static func makeNonce() -> String {
+        String(format: "%04x", UInt16.random(in: UInt16.min...UInt16.max))
+    }
 
     // MARK: - Public API
 
@@ -58,43 +69,55 @@ public enum Rampart {
     /// but left in place (e.g. keep `.ipAddress` when logs need real IPs). Returns the redacted
     /// text plus a reverse map for optional `rehydrate`.
     public static func redact(_ text: String, keep: Set<RampartEntity> = []) -> RampartRedaction {
-        guard !text.isEmpty else { return RampartRedaction(text: text, count: 0, summary: "", map: [:]) }
+        guard !text.isEmpty else { return RampartRedaction(text: text, count: 0, summary: "", map: [:], nonce: "") }
 
-        let spans = merge(detect(text)).filter { !keep.contains($0.entity) }
-        guard !spans.isEmpty else { return RampartRedaction(text: text, count: 0, summary: "", map: [:]) }
+        // `keep` is applied to the raw detections, before merge(). Filtering
+        // afterwards honoured it neither way: a kept entity that lost an overlap
+        // was redacted anyway, and one that won suppressed its neighbour too.
+        let spans = merge(detect(text).filter { !keep.contains($0.entity) })
+        guard !spans.isEmpty else { return RampartRedaction(text: text, count: 0, summary: "", map: [:], nonce: "") }
+        let nonce = makeNonce()
 
-        // Splice right-to-left so earlier UTF-16 offsets stay valid.
-        let ordered = spans.sorted { $0.start > $1.start }
         let mutable = NSMutableString(string: text)
         var forward: [String: String] = [:]     // "LABEL:normalized" → token
-        var reverse: [String: String] = [:]      // token → original value
+        var reverse: [String: String] = [:]     // token → original value
         var counters: [String: Int] = [:]
         var labelCounts: [String: Int] = [:]
         var labelOrder: [String] = []
 
-        for span in ordered {
+        // Assign tokens in reading order, so [EMAIL_1] is the FIRST email in the
+        // document. Splicing right-to-left (below) numbered them backwards, which
+        // made the placeholders read as nonsense against the model's own summary.
+        let readingOrder = spans.sorted { $0.start < $1.start }
+        for span in readingOrder {
             let label = span.entity.rawValue
             let key = "\(label):\(normalize(span.value))"
-            let token: String
-            if let existing = forward[key] {
-                token = existing
-            } else {
+            if forward[key] == nil {
                 let next = (counters[label] ?? 0) + 1
                 counters[label] = next
-                token = "[\(label)_\(next)]"
+                let token = "[\(label)_\(next)_\(nonce)]"
                 forward[key] = token
                 reverse[token] = span.value
             }
-            mutable.replaceCharacters(in: NSRange(location: span.start, length: span.end - span.start), with: token)
             if labelCounts[label] == nil { labelOrder.append(label) }
             labelCounts[label, default: 0] += 1
         }
 
+        // Splice right-to-left so earlier UTF-16 offsets stay valid.
+        for span in readingOrder.reversed() {
+            let key = "\(span.entity.rawValue):\(normalize(span.value))"
+            guard let token = forward[key] else { continue }
+            mutable.replaceCharacters(in: NSRange(location: span.start, length: span.end - span.start), with: token)
+        }
+
         let summary = labelOrder.map { "\($0)×\(labelCounts[$0]!)" }.joined(separator: ", ")
-        return RampartRedaction(text: mutable as String, count: ordered.count, summary: summary, map: reverse)
+        return RampartRedaction(text: mutable as String, count: readingOrder.count, summary: summary,
+                                map: reverse, nonce: nonce)
     }
 
-    /// Restore original values from a `redact` map. Unknown placeholders are left intact.
+    /// Restore original values from a `redact` map. Unknown placeholders — including
+    /// any an attacker planted in the source hoping to have a real value substituted
+    /// in — are left exactly as they are.
     public static func rehydrate(_ text: String, map: [String: String]) -> String {
         let ns = text as NSString
         let matches = placeholderPattern.matches(in: text, range: NSRange(location: 0, length: ns.length))
